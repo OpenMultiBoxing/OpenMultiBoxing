@@ -90,6 +90,10 @@ set rrOn 0
 if {![info exists hasRR]} {
     set hasRR 0
 }
+# Broadcast
+if {![info exists hasBR]} {
+    set hasBR 0
+}
 
 proc HasArg {argName} {
     global argv
@@ -108,6 +112,10 @@ if {![info exists wobInitDone]} {
     if {[HasArg "-rr"]} {
         set hasRR 1
         Debug "OMB $vers called with -rr (hopefully from OpenMultiBoxing_RR.exe)"
+    }
+    if {[HasArg "-b"]} {
+        set hasBR 1
+        Debug "OMB $vers called with -b (broadcasting)"
     }
     if {[HasArg "-profile"]} {
         set initProfile [lindex $argv end]
@@ -568,7 +576,7 @@ set ourTitle "OpenMultiBoxing - Opensource MultiBoxing"
 proc UISetup {} {
     global imgOMB70 vers stayOnTop pos windowSize settings \
          mouseFollow mouseRaise mouseDelay ourTitle bottomText \
-         rrOn hasRR mouseBroadcast
+         rrOn hasRR hasBR RRlabel rrlabel mouseBroadcast
     wm title . $ourTitle
     # Get logo
     set err [GetLogo]
@@ -607,18 +615,24 @@ proc UISetup {} {
     tooltip .cboverlay "Show/Hide the overlay info\nHotkey: $settings(hk,overlayToggle)"
     tooltip .cbocfg "Opens the overlay config which let's you configure\nborder, color, positions, etc... for the overlay"
 
-    if {$hasRR} {
+    if {$hasRR||$hasBR} {
+        set RRlabel "Round robin"
+        set rrlabel "round robin"
+        if {$hasBR} {
+            set RRlabel "Broadcast"
+            set rrlabel "broadcast"
+        }
         grid [frame .sepRR -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
-        grid [ttk::label .lRR -text "⟳ Round robin settings:" -font "*-*-bold" -anchor sw] -padx 4 -columnspan 2 -sticky w
-        grid [ttk::checkbutton .cbRR -text "Round Robin ($settings(hk,rrToggle))" -variable rrOn -command RRUpdate] -padx 4 -columnspan 2 -sticky w
-        tooltip .cbRR "Toggle round robin mode\nAlso turns off mouse focus and restore as needed while on\nHotkey: $settings(hk,rrToggle)"
-        grid [ttk::label .lrrK -text "Round Robin to all windows keys:"] -padx 4 -columnspan 2 -sticky w
+        grid [ttk::label .lRR -text "⟳ $RRlabel settings:" -font "*-*-bold" -anchor sw] -padx 4 -columnspan 2 -sticky w
+        grid [ttk::checkbutton .cbRR -text "$RRlabel ($settings(hk,rrToggle))" -variable rrOn -command RRUpdate] -padx 4 -columnspan 2 -sticky w
+        tooltip .cbRR "Toggle $rrlabel mode\nAlso turns off mouse focus and restore as needed while on\nHotkey: $settings(hk,rrToggle)"
+        grid [ttk::label .lrrK -text "$RRlabel to all windows keys:"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eRR -textvariable settings(rrKeyListAll) -width $width] -columnspan 2 -padx 4 -sticky ew
         bind .eRR <Return> RRKeysListChange
-        tooltip .eRR "Which keys trigger round robin for all windows\nHit <Return> after change to take effect.\nSee help/FAQ for list."
-        grid [ttk::label .lrrK2 -text "No Round Robin when:"] -padx 4 -columnspan 2 -sticky w
+        tooltip .eRR "Which keys trigger $rrlabel for all windows\nHit <Return> after change to take effect.\nSee help/FAQ for list."
+        grid [ttk::label .lrrK2 -text "No $RRlabel when:"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eRR2 -textvariable settings(rrModExcludeList) -width $width] -columnspan 2 -padx 4 -sticky ew
-        tooltip .eRR2 "Which modifiers pause round robin while held\nHit <Return> after change to take effect.\nSee help/FAQ for list."
+        tooltip .eRR2 "Which modifiers pause $rrlabel while held\nHit <Return> after change to take effect.\nSee help/FAQ for list."
         bind .eRR2 <Return> RRKeysListChange
         set rrC .rrC
         frame $rrC
@@ -629,7 +643,7 @@ proc UISetup {} {
         pack [ttk::label $rrC.lrrK3 -text "Custom rotation keys:" -anchor w] $rrC.rrMenuB -anchor w -side left -expand 1
         grid $rrC -padx 4 -columnspan 2 -sticky ew
         grid [entry .eRR3 -textvariable settings(rrKeyListCustom) -width $width] -columnspan 2 -padx 4 -sticky ew
-        tooltip .eRR3 "Which keys trigger custom rotation round robin\nHit <Return> after change to take effect.\nSee help/FAQ for list."
+        tooltip .eRR3 "Which keys trigger custom rotation $rrlabel\nHit <Return> after change to take effect.\nSee help/FAQ for list."
         bind .eRR3 <Return> RRKeysListChange
         grid [ttk::label .lrrD -text "Direct focus keys (Main, WOB1...N):"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eRR4 -textvariable settings(rrKeyListDirect) -width $width] -columnspan 2 -padx 4 -sticky ew
@@ -664,8 +678,8 @@ proc UpdateForegroundMode {} {
 }
 
 proc About {} {
-    global vers hasRR inExe oldVersion
-    if {$hasRR} {
+    global vers hasRR hasBR inExe oldVersion
+    if {$hasRR||$hasBR} {
         set extra "(with RoundRobin enabled)"
     } else {
         set extra "(without RoundRobin, launch OpenMultiBoxing_RR-${vers}.exe to enable)."
@@ -706,7 +720,7 @@ proc BroadcastClipboard {} {
 }
 
 proc ClipboardManager {} {
-    global clipboardValue rrOn hasRR settings
+    global clipboardValue rrOn hasRR hasBR settings
     set tw .clip
     if {[winfo exists $tw]} {
         wm state $tw normal
@@ -772,7 +786,7 @@ proc UpdateProfilesMenu {} {
 }
 
 proc MenuSetup {} {
-    global vers settings hasRR mouseRaise
+    global vers settings hasRR hasBR mouseRaise
     if {[winfo exists .mbar]} {
         return
     }
@@ -832,7 +846,7 @@ proc MenuSetup {} {
     $m3 add radiobutton -label "Auto reset focus to main: after 1 sec" -value 1 -variable settings(autoResetFocusToMain)
     $m3 add radiobutton -label "Auto reset focus to main: after 2 sec" -value 2 -variable settings(autoResetFocusToMain)
     $m3 add radiobutton -label "Auto reset focus to main: after 3 sec" -value 3 -variable settings(autoResetFocusToMain)
-    if {$hasRR} {
+    if {$hasRR||$hasBR} {
         $m3 add checkbutton -label "Auto reset after direct RR keys" -variable settings(autoResetDirect)
         $m3 add checkbutton -label "Always focus (if mixing click and RR)" -variable settings(rrAlwaysFocus)
     }
@@ -1106,7 +1120,7 @@ set isPaused 0
 set pauseSchedule {}
 
 proc PeriodicChecks {} {
-    global settings isPaused prevRR prevMF prevOL prevRRMouse hasRR rrOn rrMouse mouseFollow\
+    global settings isPaused prevRR prevMF prevOL prevRRMouse hasRR hasBR rrOn rrMouse mouseFollow\
          maxNumW pauseSchedule lastFocusWindow slot2handle mouseBroadcast
     after cancel $pauseSchedule
     set pauseSchedule {}
@@ -1564,7 +1578,7 @@ array set slot2handle {}
 array set slot2position {}
 
 proc FocusN {n fg {update 1}} {
-    global slot2handle slot2position focusWindow lastFocusWindow settings hasRR
+    global slot2handle slot2position focusWindow lastFocusWindow settings hasRR hasBR
     if {[info exists slot2handle($n)]} {
         FocusNinternal $n $fg
     } else {
@@ -1577,7 +1591,7 @@ proc FocusN {n fg {update 1}} {
 }
 
 proc FocusNinternal {n fg} {
-    global slot2handle slot2position lastFocusWindow settings hasRR
+    global slot2handle slot2position lastFocusWindow settings hasRR hasBR
     set wh $slot2handle($n)
     set p $slot2position($n)
     Debug "FocusN $n called, at position $p - fg is $fg"
@@ -2484,7 +2498,7 @@ proc BroadcastMouseClick {x y} {
 # --- start of RR ---
 
 proc RRToggle {} {
-    global rrOn hasRR vers
+    global rrOn hasRR hasBR vers
     if {!$hasRR} {
         OmbError "Round Robin not enabled" "You must start OMB by launching\n\n   OpenMultiBoxing_RR-${vers}.exe\n\nif you decide to enable RounRobin."
     }
@@ -2510,7 +2524,7 @@ proc RRreadAllKeys {} {
 }
 
 proc RRUpdate {} {
-    global rrOn rrOnLabel settings hasRR mouseFollow rrMouse rrLastCode rrTaskId mouseBroadcast
+    global rrOn rrOnLabel settings hasRR hasBR mouseFollow rrMouse rrLastCode rrTaskId mouseBroadcast
     Debug "RRupdate $rrOn"
     if {[info exists rrTaskId]} {
         after cancel $rrTaskId
@@ -2685,8 +2699,8 @@ proc RRCustomUpdateSettings {} {
 }
 
 proc RRCustomMenu {} {
-    global settings rrCustom hasRR
-    if {!$hasRR} {
+    global settings rrCustom hasRR hasBR
+    if {!$hasRR&&!$hasBR} {
         return
     }
     RRCustomToArray
@@ -2743,7 +2757,7 @@ proc OverlayUpdate {} {
 }
 
 proc OverlayConfig {} {
-    global settings hasRR
+    global settings hasRR hasBR RRlabel
     set tw .overlayConfig
     set settings(showOverlay) 1
     OverlayUpdate
@@ -2773,8 +2787,8 @@ proc OverlayConfig {} {
 
     grid [ttk::checkbutton $tw.clickable -text "Clickable overlay" -variable settings(overlayClickable) -command "Overlay; SaveSettings"] -padx 8 -pady 2 -columnspan 3
     grid [ttk::checkbutton $tw.bigAll -text "Click to swap all area on windows 2+" -variable settings(overlayAllClickable) -command "Overlay; SaveSettings"] -padx 8 -pady 2 -columnspan 3
-    if {$hasRR} {
-        grid [ttk::label $tw.lr1 -text "Round Robin indicator:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
+    if {$hasRR||$hasBR} {
+        grid [ttk::label $tw.lr1 -text "$RRlabel indicator:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
         grid [ttk::label $tw.lr2 -text "Label:" -anchor e] [entry $tw.re1 -width 5 -textvariable settings(rrIndicator,label)] -sticky ew -padx 6
         bind $tw.re1 <Return> "RRUpdate; SaveSettings"
         tooltip $tw.re1 "What is shown when RR is on"
@@ -2783,7 +2797,7 @@ proc OverlayConfig {} {
     grid [ttk::label $tw.lm2 -text "Label:" -anchor e] [entry $tw.me1 -width 5 -textvariable settings(mfIndicator,label)] -sticky ew -padx 6
     tooltip $tw.me1 "What is shown when Focus Follow Mouse is on"
     bind $tw.me1 <Return> "AddMouseToRRLabel; SaveSettings"
-    if {$hasRR} {
+    if {$hasRR||$hasBR} {
         grid [ttk::label $tw.lp1 -text "⟳ and 🖰 indicators position:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
     }
     grid [ttk::label $tw.lr3 -text "X:" -anchor e] [entry $tw.re2 -width 5 -textvariable settings(rrIndicator,x)] -sticky ew -padx 6
@@ -3575,7 +3589,7 @@ array set settings {
     hk,mouseBroadcast "Ctrl-M"
     mouseBroadcastDelay 30
 }
-set settings(mouseInsideGameWindowFocuses) $hasRR
+set settings(mouseInsideGameWindowFocuses) $hasRR||$hasBR
 
 
 # globals
