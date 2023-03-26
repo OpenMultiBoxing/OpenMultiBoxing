@@ -26,7 +26,7 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
 - Free, OpenSource and the Safest option available.
 - Online [help](https://OpenMultiBoxing.org/help), menus and tooltips on most UI element to help discovering features.
 
-Note: key broadcasting replaces round robin in latest version of OpenMultiBoxing (WowOpenBox still only has optional Round Robin and no possibility of broadcasting, per Blizzard's multiboxing changes). Not all the help/doc/screenshots have been updated, use version 6 or below for RoundRobin instead of broadcasting.
+Note: key broadcasting replaces round robin in the latest version of OpenMultiBoxing (WowOpenBox still only has optional Round Robin and no possibility of broadcasting, per Blizzard's multiboxing changes). Not all the help/doc/screenshots have been updated, use version 6 or below if you prefer to use RoundRobin instead of broadcasting.
 
 ## Installation
 
