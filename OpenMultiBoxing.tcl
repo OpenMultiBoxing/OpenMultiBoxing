@@ -17,6 +17,12 @@ package require tkdnd
 namespace import tooltip::tooltip
 # tkk native
 ttk::style theme use winnative
+# handle updates from wrong/old binary
+#catch {
+#    package require cffi
+#    cffi::Wrapper create user32 [file join $env(windir) system32 user32.dll]
+#    user32 function GetKeyboardState int {state {uchar[256] out}}
+#}
 
 # start not showing top level for error dialogs
 wm state . withdrawn
@@ -438,12 +444,6 @@ proc AfterSettings {} {
     if {$settings(rrInterval) == 50} {
         set settings(rrInterval) 5
     }
-    if {[info exists settings(rrKeyList)]} {
-        # convert to space separated from tcl list
-        set settings(rrKeyListAll) [join $settings(rrKeyList) " "]
-        set settings(rrModExcludeList) [join $settings(rrModExcludeList) " "]
-        unset settings(rrKeyList)
-    }
     set toAdd "SndVol.exe"
     if {[lsearch -exact $settings(dontCaptureList) $toAdd]==-1} {
         lappend settings(dontCaptureList) $toAdd
@@ -622,10 +622,10 @@ proc UISetup {} {
         grid [ttk::label .lRR -text "⟳ $RRlabel settings:" -font "*-*-bold" -anchor sw] -padx 4 -columnspan 2 -sticky w
         grid [ttk::checkbutton .cbRR -text "$RRlabel ($settings(hk,rrToggle))" -variable rrOn -command RRUpdate] -padx 4 -columnspan 2 -sticky w
         tooltip .cbRR "Toggle $rrlabel mode\nAlso turns off mouse focus and restore as needed while on\nHotkey: $settings(hk,rrToggle)"
-        grid [ttk::label .lrrK -text "$RRlabel to other windows keys:"] -padx 4 -columnspan 2 -sticky w
-        grid [entry .eRR -textvariable settings(rrKeyListAll) -width $width] -columnspan 2 -padx 4 -sticky ew
+        grid [ttk::label .lrrK -text "$RRlabel to other windows all but these keys:"] -padx 4 -columnspan 2 -sticky w
+        grid [entry .eRR -textvariable settings(rrKeyListExclude) -width $width] -columnspan 2 -padx 4 -sticky ew
         bind .eRR <Return> RRKeysListChange
-        tooltip .eRR "Which keys trigger $rrlabel for all windows\nHit <Return> after change to take effect.\nSee help/FAQ for list."
+        tooltip .eRR "Which keys are excluded from $rrlabel for all windows\nHit <Return> after change to take effect.\nSee help/FAQ for list."
         grid [ttk::label .lrrK2 -text "No $RRlabel when:"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eRR2 -textvariable settings(rrModExcludeList) -width $width] -columnspan 2 -padx 4 -sticky ew
         tooltip .eRR2 "Which modifiers pause $rrlabel while held\nHit <Return> after change to take effect.\nSee help/FAQ for list."
@@ -2472,11 +2472,15 @@ proc BroadcastKey {keyCode {delayMs 100}} {
 proc BroadcastKeyToOther {n keyCode up} {
     global slot2handle
     set ev [expr {0x0100+$up}]
+    set lparam 0
+    if {$up} {
+        set lparam 0xC0000001
+    }
     foreach {i w} [array get slot2handle] {
         if {$i==$n} {
             continue
         }
-        twapi::PostMessage $w $ev $keyCode 1
+        twapi::PostMessage $w $ev $keyCode $lparam
     }
 }
 
@@ -2499,6 +2503,17 @@ proc BroadcastMouseClick {x y} {
 }
 
 # --- start of RR, now Broadcasting ---
+
+# returns 1 if the binary has the needed cffi support
+proc CheckBinary {} {
+    global vers
+    if {![namespace exists "cffi"]} {
+        OmbError "Outdated binary for Broadcasting"\
+            "To use broadcasting, you must download a more recent\nOMB .exe: get and extract OpenMultiboxing-${vers}.zip\n\nVisit https://OpenMultiBoxing.org click \"Get the Software\""
+        return 0
+    }
+    return 1
+}
 
 proc RRToggle {} {
     global rrOn hasRR hasBR vers
@@ -2554,6 +2569,9 @@ proc RRUpdate {} {
         }
     }
     AddMouseToRRLabel
+    # read twice
+    GetKeyboardState
+    set rrLastCode [GetKeyboardState]
     Debug "Reset all Broadcasting key states"
 }
 
@@ -2594,14 +2612,65 @@ set rrCodesCustom {}
 set rrCodesDirect {}
 proc RRKeysListChange {} {
     global settings rrCodes rrExcludes rrCodesCustom rrCodesDirect
-    lassign [RRkeyListToCodes $settings(rrKeyListAll)] rrCodes settings(rrKeyListAll)
-    lassign [RRkeyListToCodes $settings(rrKeyListCustom)] rrCodesCustom settings(rrKeyListCustom)
-    lassign [RRkeyListToCodes $settings(rrKeyListDirect) ".*"] rrCodesDirect settings(rrKeyListDirect)
+    lassign [RRkeyListToCodes $settings(rrKeyListExclude)] rrCodes settings(rrKeyListExclude)
+    #lassign [RRkeyListToCodes $settings(rrKeyListCustom)] rrCodesCustom settings(rrKeyListCustom)
+    #lassign [RRkeyListToCodes $settings(rrKeyListDirect) ".*"] rrCodesDirect settings(rrKeyListDirect)
     lassign [RRkeyListToCodes $settings(rrModExcludeList)] rrExcludes settings(rrModExcludeList)
+    ResetIgnoredKeys $rrCodes
 }
 
 set rrLastCode {}
 set rrLastCustom 0
+
+proc ResetIgnoredKeys {codes} {
+    global ignoredKeyCode
+    catch {unset ignoredKeyCode}
+    array set ignoredKeyCode {}
+    for {set i 0} {$i <= 7} {incr i} {
+        set ignoredKeyCode($i) 1
+    }
+    # Ignore the non specific shift, ctrl, alt (instead we use lalt/ralt etc)
+    foreach code {16 17 18} {
+        set ignoredKeyCode($code) 1
+    }
+    foreach code $codes {
+        set ignoredKeyCode($code) 1
+    }
+    Debug "ResetIgnoredKeys [array names ignoredKeyCode]"
+}
+
+proc GetKeyboardState {} {
+    global ignoredKeyCode
+    set res {}
+    for {set i 0} {$i <= 254} {incr i} {
+        if {[info exists ignoredKeyCode($i)]} {
+            lappend res 0
+        } else {
+            lappend res [expr {[twapi::GetAsyncKeyState $i]>0}]
+        }
+    }
+    return $res
+}
+
+# Compare old and new state and return the list of keys that changed
+proc DeltaKeyboardState {oldState newState} {
+    set resUp {}
+    set resDown {}
+    for {set i 0} {$i<[llength $oldState]} {incr i} {
+        set old [lindex $oldState $i]
+        set new [lindex $newState $i]
+        if {$old!=$new} {
+            Debug "Key 0x[format %02x $i] changed from [format %x $old] to [format %x $new]"
+            if {$old==0} {
+                lappend resDown [expr $i]
+            } else {
+                lappend resUp $i
+            }
+        }
+    }
+    return [list $resUp $resDown]
+}
+
 
 proc RRCheck {} {
     global rrCodes rrCodesCustom rrCodesDirect rrExcludes rrLastCode rrLastCustom rrTaskId settings maxNumW
@@ -2616,17 +2685,25 @@ proc RRCheck {} {
         set state [twapi::GetAsyncKeyState $code]
         if {$state != 0} {
             # modifier held; return
+            set rrLastCode [GetKeyboardState]
             return
         }
     }
-    # Watch for reset of last key
-    if {$rrLastCode != ""} {
-        if {[twapi::GetAsyncKeyState $rrLastCode]==0} {
-            Debug "Key $rrLastCode now reset... sending up event"
-            BroadcastKeyToOther $n $rrLastCode 1
-            set rrLastCode {}
-        }
+    # current state
+    set curState [GetKeyboardState]
+    lassign [DeltaKeyboardState $rrLastCode $curState] newUp newDown
+    #Debug "RRCheck: newUp $newUp newDown $newDown"
+    set rrLastCode $curState
+    foreach code $newUp {
+        Debug "Key $code now reset, sending up event"
+        BroadcastKeyToOther $n $code 1
     }
+    foreach code $newDown {
+        Debug "Key $code now down, sending down event"
+        BroadcastKeyToOther $n $code 0
+    }
+
+
     # direct on key down
     # set i 0
     # foreach code $rrCodesDirect {
@@ -2649,23 +2726,6 @@ proc RRCheck {} {
     #         return
     #     }
     # }
-    foreach code $rrCodes {
-        set state [twapi::GetAsyncKeyState $code]
-        #Debug "Checking $k -> $code -> [format %x $state]"
-        if {$state != 0 && $rrLastCode != $code} {
-            Debug "New key $code sending down event"
-            BroadcastKeyToOther $n $code 0
-            if {$rrLastCode != ""} {
-                # For now can only remember 1 held key at a time
-                Debug "New key $code so sending up to previous $rrLastCode one"
-                BroadcastKeyToOther $n $rrLastCode 1
-            }
-            set rrLastCode $code
-            set rrLastCustom 0
-            #Debug "RR for $code [format %x $state]"
-            return
-        }
-    }
 }
 
 proc FocusDirect {n} {
@@ -2694,9 +2754,9 @@ proc RRCustomToArray {} {
     global settings rrCustom
     catch {unset rrCustom}
     array set rrCustom {}
-    foreach w $settings(rrCustomExcludeList) {
-        set rrCustom($w) 1
-    }
+    #foreach w $settings(rrCustomExcludeList) {
+    #    set rrCustom($w) 1
+    #}
 }
 
 proc RRCustomUpdateSettings {} {
@@ -3571,11 +3631,8 @@ array set settings {
     profile "Default"
     profiles {"Default"}
     borderless 1
-    rrKeyListAll ". F B T I \[ \] SPACE 1 2 3 4 5 6 7 8 9 0 - = UP LEFT RIGHT DOWN"
-    rrKeyListCustom ". [ ] F11"
-    rrKeyListDirect ".m .1 .2 .3 ..."
-    rrCustomExcludeList 0
-    rrModExcludeList "RCONTROL RSHIFT"
+    rrKeyListExclude "W A S D"
+    rrModExcludeList "RCONTROL RSHIFT RALT"
     rrInterval 5
     rrAlwaysFocus 1
     autoResetFocusToMain 1
@@ -3600,6 +3657,11 @@ array set settings {
     hk,mouseBroadcast "Ctrl-M"
     mouseBroadcastDelay 30
 }
+#   rrKeyListAll ". F B T I \[ \] SPACE 1 2 3 4 5 6 7 8 9 0 - = UP LEFT RIGHT DOWN"
+#   rrKeyListCustom ". [ ] F11"
+#   rrKeyListDirect ".m .1 .2 .3 ..."
+#   rrCustomExcludeList 0
+
 set settings(mouseInsideGameWindowFocuses) [expr {$hasRR||$hasBR}]
 
 
@@ -3702,3 +3764,6 @@ if {$settings(clipboardAtStart)} {
 }
 # Mouse tracking/auto pause and auto capture
 Defer 350 PeriodicChecks
+
+# For now not using cffi as it doesn't read full keyboard state anyway
+#Defer 300 CheckBinary
