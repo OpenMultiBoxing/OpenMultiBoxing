@@ -85,15 +85,19 @@ set SETTINGS_PREFIX "OpenMultiBoxingSettings"
 set SETTINGS_SUFFIX ".tcl"
 set SETTINGS_BASE "$SETTINGS_PREFIX$SETTINGS_SUFFIX"
 
-# RR init upgrade aware
+# From version 7.0.0 we support basic key broadcasting instead of Round Robin keys
+# Many function and variables have "RR" in the name but actually now are about broadcasting.
+# I started with supporting both (see the RRlabel variable) but it was getting quite messy bunch
+# of if all over so I decided to drop RR (it's there in WOB and previous versions too)
+# and update the RR code to use broadcasting instead. It does mean some options probably don't make
+# sense anymore and need further cleanup.
+# Note that PostMessage for key broadcasting, unlike RR has the nice benefit of not needing the special
+# _RR binary wrapper so that's one less "configuration" to worry about.
+
 set rrOn 0
-if {![info exists hasRR]} {
-    set hasRR 0
-}
-# Broadcast
-if {![info exists hasBR]} {
-    set hasBR 0
-}
+# Unlike for RoundRobin to work, we don't need the special binary wrapper so Broadcasting is supported by default
+set hasRR 1
+set hasBR 1
 
 proc HasArg {argName} {
     global argv
@@ -108,14 +112,6 @@ if {![info exists wobInitDone]} {
         set forceDebug 1
         catch {console show}
         Debug "OMB $vers called with -debug"
-    }
-    if {[HasArg "-rr"]} {
-        set hasRR 1
-        Debug "OMB $vers called with -rr (hopefully from OpenMultiBoxing_RR.exe)"
-    }
-    if {[HasArg "-b"]} {
-        set hasBR 1
-        Debug "OMB $vers called with -b (broadcasting)"
     }
     if {[HasArg "-profile"]} {
         set initProfile [lindex $argv end]
@@ -626,7 +622,7 @@ proc UISetup {} {
         grid [ttk::label .lRR -text "⟳ $RRlabel settings:" -font "*-*-bold" -anchor sw] -padx 4 -columnspan 2 -sticky w
         grid [ttk::checkbutton .cbRR -text "$RRlabel ($settings(hk,rrToggle))" -variable rrOn -command RRUpdate] -padx 4 -columnspan 2 -sticky w
         tooltip .cbRR "Toggle $rrlabel mode\nAlso turns off mouse focus and restore as needed while on\nHotkey: $settings(hk,rrToggle)"
-        grid [ttk::label .lrrK -text "$RRlabel to all windows keys:"] -padx 4 -columnspan 2 -sticky w
+        grid [ttk::label .lrrK -text "$RRlabel to other windows keys:"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eRR -textvariable settings(rrKeyListAll) -width $width] -columnspan 2 -padx 4 -sticky ew
         bind .eRR <Return> RRKeysListChange
         tooltip .eRR "Which keys trigger $rrlabel for all windows\nHit <Return> after change to take effect.\nSee help/FAQ for list."
@@ -641,14 +637,14 @@ proc UISetup {} {
         RRCustomMenu
         tooltip $rrC.rrMenuB "Select which window(s) are excluded from custom rotation"
         pack [ttk::label $rrC.lrrK3 -text "Custom rotation keys:" -anchor w] $rrC.rrMenuB -anchor w -side left -expand 1
-        grid $rrC -padx 4 -columnspan 2 -sticky ew
-        grid [entry .eRR3 -textvariable settings(rrKeyListCustom) -width $width] -columnspan 2 -padx 4 -sticky ew
-        tooltip .eRR3 "Which keys trigger custom rotation $rrlabel\nHit <Return> after change to take effect.\nSee help/FAQ for list."
-        bind .eRR3 <Return> RRKeysListChange
-        grid [ttk::label .lrrD -text "Direct focus keys (Main, WOB1...N):"] -padx 4 -columnspan 2 -sticky w
-        grid [entry .eRR4 -textvariable settings(rrKeyListDirect) -width $width] -columnspan 2 -padx 4 -sticky ew
-        tooltip .eRR4 "Which key will switch focus asap directly to Main, WOB1, WOB2,...\nFirst key will focus main, 2nd key will focus WOB1, 3rd key will focus WOB2,...\nTo skip a slot position use .*\nRemember this is in addition to the focus hotkeys.\nHit <Return> after change to take effect.\nSee help/FAQ for list."
-        bind .eRR4 <Return> RRKeysListChange
+        # grid $rrC -padx 4 -columnspan 2 -sticky ew
+        # grid [entry .eRR3 -textvariable settings(rrKeyListCustom) -width $width] -columnspan 2 -padx 4 -sticky ew
+        # tooltip .eRR3 "Which keys trigger custom rotation $rrlabel\nHit <Return> after change to take effect.\nSee help/FAQ for list."
+        # bind .eRR3 <Return> RRKeysListChange
+        # grid [ttk::label .lrrD -text "Direct focus keys (Main, WOB1...N):"] -padx 4 -columnspan 2 -sticky w
+        # grid [entry .eRR4 -textvariable settings(rrKeyListDirect) -width $width] -columnspan 2 -padx 4 -sticky ew
+        # tooltip .eRR4 "Which key will switch focus asap directly to Main, WOB1, WOB2,...\nFirst key will focus main, 2nd key will focus WOB1, 3rd key will focus WOB2,...\nTo skip a slot position use .*\nRemember this is in addition to the focus hotkeys.\nHit <Return> after change to take effect.\nSee help/FAQ for list."
+        # bind .eRR4 <Return> RRKeysListChange
     }
 
     grid [frame .sep2 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
@@ -680,9 +676,7 @@ proc UpdateForegroundMode {} {
 proc About {} {
     global vers hasRR hasBR inExe oldVersion
     if {$hasRR||$hasBR} {
-        set extra "(with RoundRobin enabled)"
-    } else {
-        set extra "(without RoundRobin, launch OpenMultiBoxing_RR-${vers}.exe to enable)."
+        set extra "(with optional Broadcasting)"
     }
     if {$inExe && [info exists oldVersion] && $oldVersion !=$vers} {
         set extra "Binary version $oldVersion\n$extra"
@@ -830,9 +824,7 @@ proc MenuSetup {} {
     menu $m3 -tearoff 0
     .mbar add cascade -label Option -menu $m3
     $m3 add checkbutton -label "Swap hotkey also focuses" -variable settings(swapAlsoFocus)
-    if {!$hasRR} {
-        $m3 add checkbutton -label "Focus hotkey also foregrounds" -variable settings(focusAlsoFG)
-    }
+    $m3 add checkbutton -label "Focus hotkey also foregrounds" -variable settings(focusAlsoFG)
     $m3 add checkbutton -label "Auto Capture Game windows" -variable settings(autoCapture)
     $m3 add checkbutton -label "Capture makes windows borderless" -variable settings(borderless)
     $m3 add checkbutton -label "Auto Kill \"$settings(autoKillName)\"" -variable settings(autoKillOn)
@@ -846,10 +838,8 @@ proc MenuSetup {} {
     $m3 add radiobutton -label "Auto reset focus to main: after 1 sec" -value 1 -variable settings(autoResetFocusToMain)
     $m3 add radiobutton -label "Auto reset focus to main: after 2 sec" -value 2 -variable settings(autoResetFocusToMain)
     $m3 add radiobutton -label "Auto reset focus to main: after 3 sec" -value 3 -variable settings(autoResetFocusToMain)
-    if {$hasRR||$hasBR} {
-        $m3 add checkbutton -label "Auto reset after direct RR keys" -variable settings(autoResetDirect)
-        $m3 add checkbutton -label "Always focus (if mixing click and RR)" -variable settings(rrAlwaysFocus)
-    }
+    $m3 add checkbutton -label "Auto reset after direct BR keys" -variable settings(autoResetDirect)
+    $m3 add checkbutton -label "Always focus (if mixing click and RR)" -variable settings(rrAlwaysFocus)
     $m3 add separator
     $m3 add checkbutton -label "Pause when mouse is outside windows" -variable settings(mouseOutsideWindowsPauses)
     $m3 add checkbutton -label "Focus back when mouse in game window" -variable settings(mouseInsideGameWindowFocuses)
@@ -1681,7 +1671,7 @@ proc NextCustomWindow {} {
     # wob2 is the one in main
     Debug "Nothing found $excl $maxNumW staying on $customWindow"
     if {$excl==$maxNumW-1} {
-        OmbError "Custom RR Error" "Invalid Custom Rotation, All windows are disabled!"
+        OmbError "Custom Broadcasting Error" "Invalid Custom Rotation, All windows are disabled!"
     }
     return $customWindow
 }
@@ -2477,6 +2467,19 @@ proc BroadcastKey {keyCode {delayMs 100}} {
     # could also use twapi::send_input but that changes fg/active window
 }
 
+# Send key to all windows except the one with the given slot number
+# Use up=1 for key up, up=0 for key down
+proc BroadcastKeyToOther {n keyCode up} {
+    global slot2handle
+    set ev [expr {0x0100+$up}]
+    foreach {i w} [array get slot2handle] {
+        if {$i==$n} {
+            continue
+        }
+        twapi::PostMessage $w $ev $keyCode 1
+    }
+}
+
 # Unfortunatly this does not work (mouse coords are not used, it only clicks where the mouse really is)
 proc BroadcastMouseClick {x y} {
     global slot2handle settings
@@ -2495,18 +2498,15 @@ proc BroadcastMouseClick {x y} {
     }
 }
 
-# --- start of RR ---
+# --- start of RR, now Broadcasting ---
 
 proc RRToggle {} {
     global rrOn hasRR hasBR vers
-    if {!$hasRR} {
-        OmbError "Round Robin not enabled" "You must start OMB by launching\n\n   OpenMultiBoxing_RR-${vers}.exe\n\nif you decide to enable RounRobin."
-    }
     set rrOn [expr {!$rrOn}]
     RRUpdate
 }
 
-# Read/reset all keys so we don't pile up keydown when RR is off
+# Read/reset all keys so we don't pile up keydown when Broadcasting is off
 proc RRreadAllKeys {} {
     global rrCodes rrExcludes rrCodesCustom rrCodesDirect
     foreach code $rrExcludes {
@@ -2554,7 +2554,7 @@ proc RRUpdate {} {
         }
     }
     AddMouseToRRLabel
-    Debug "Reset all RR key states"
+    Debug "Reset all Broadcasting key states"
 }
 
 proc RRkeyListToCodes {keyList {noneKeyPattern ""}} {
@@ -2574,7 +2574,7 @@ proc RRkeyListToCodes {keyList {noneKeyPattern ""}} {
                 # only for direct we need to skip some positions
                 set code 0
             } elseif {![info exists twapi::vk_map($k)]} {
-                OmbError "Invalid RR key" "$k isn't a valid key"
+                OmbError "Invalid Broadcasting key" "$k isn't a valid key"
                 continue
             } else {
                 set code [expr [lindex $twapi::vk_map($k) 0]]
@@ -2607,6 +2607,11 @@ proc RRCheck {} {
     global rrCodes rrCodesCustom rrCodesDirect rrExcludes rrLastCode rrLastCustom rrTaskId settings maxNumW
     set rrTaskId [after $settings(rrInterval) RRCheck]
     #Debug "RR Check..."
+    set n 1
+    if {![MouseIsIn]==$n} {
+        #Debug "Mouse not in $n"
+        return
+    }
     foreach code $rrExcludes {
         set state [twapi::GetAsyncKeyState $code]
         if {$state != 0} {
@@ -2617,38 +2622,44 @@ proc RRCheck {} {
     # Watch for reset of last key
     if {$rrLastCode != ""} {
         if {[twapi::GetAsyncKeyState $rrLastCode]==0} {
-            Debug "Key $rrLastCode now reset... Next window - custom $rrLastCustom"
+            Debug "Key $rrLastCode now reset... sending up event"
+            BroadcastKeyToOther $n $rrLastCode 1
             set rrLastCode {}
-            FocusNextWindow $rrLastCustom
         }
-        return
     }
     # direct on key down
-    set i 0
-    foreach code $rrCodesDirect {
-        # Allow "NONE"
-        if {$code != 0} {
-            set state [twapi::GetAsyncKeyState $code]
-            if {$state != 0} {
-                FocusDirect [expr {$i%($settings(numWindows)+1)}]
-                break
-            }
-        }
-        incr i
-    }
-    # custom rotation, keyUp normal mode
-    foreach code $rrCodesCustom {
-        set state [twapi::GetAsyncKeyState $code]
-        if {$state != 0} {
-            set rrLastCode $code
-            set rrLastCustom 1
-            return
-        }
-    }
+    # set i 0
+    # foreach code $rrCodesDirect {
+    #     # Allow "NONE"
+    #     if {$code != 0} {
+    #         set state [twapi::GetAsyncKeyState $code]
+    #         if {$state != 0} {
+    #             FocusDirect [expr {$i%($settings(numWindows)+1)}]
+    #             break
+    #         }
+    #     }
+    #     incr i
+    # }
+    # # custom rotation, keyUp normal mode
+    # foreach code $rrCodesCustom {
+    #     set state [twapi::GetAsyncKeyState $code]
+    #     if {$state != 0} {
+    #         set rrLastCode $code
+    #         set rrLastCustom 1
+    #         return
+    #     }
+    # }
     foreach code $rrCodes {
         set state [twapi::GetAsyncKeyState $code]
         #Debug "Checking $k -> $code -> [format %x $state]"
-        if {$state != 0} {
+        if {$state != 0 && $rrLastCode != $code} {
+            Debug "New key $code sending down event"
+            BroadcastKeyToOther $n $code 0
+            if {$rrLastCode != ""} {
+                # For now can only remember 1 held key at a time
+                Debug "New key $code so sending up to previous $rrLastCode one"
+                BroadcastKeyToOther $n $rrLastCode 1
+            }
             set rrLastCode $code
             set rrLastCustom 0
             #Debug "RR for $code [format %x $state]"
@@ -2715,7 +2726,7 @@ proc RRCustomMenu {} {
     }
 }
 
-# --- end of RR ---
+# --- end of Broadcasting ---
 
 proc OverlayToggle {} {
     global settings
@@ -2791,7 +2802,7 @@ proc OverlayConfig {} {
         grid [ttk::label $tw.lr1 -text "$RRlabel indicator:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
         grid [ttk::label $tw.lr2 -text "Label:" -anchor e] [entry $tw.re1 -width 5 -textvariable settings(rrIndicator,label)] -sticky ew -padx 6
         bind $tw.re1 <Return> "RRUpdate; SaveSettings"
-        tooltip $tw.re1 "What is shown when RR is on"
+        tooltip $tw.re1 "What is shown when Broadcasting is on"
     }
     grid [ttk::label $tw.lm1 -text "Mouse Broadcast indicator:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
     grid [ttk::label $tw.lm2 -text "Label:" -anchor e] [entry $tw.me1 -width 5 -textvariable settings(mfIndicator,label)] -sticky ew -padx 6
@@ -3560,7 +3571,7 @@ array set settings {
     profile "Default"
     profiles {"Default"}
     borderless 1
-    rrKeyListAll "SPACE 1 2 3 4 5 6 7 8 9 0 - ="
+    rrKeyListAll ". F B T I \[ \] SPACE 1 2 3 4 5 6 7 8 9 0 - = UP LEFT RIGHT DOWN"
     rrKeyListCustom ". [ ] F11"
     rrKeyListDirect ".m .1 .2 .3 ..."
     rrCustomExcludeList 0
@@ -3589,7 +3600,7 @@ array set settings {
     hk,mouseBroadcast "Ctrl-M"
     mouseBroadcastDelay 30
 }
-set settings(mouseInsideGameWindowFocuses) $hasRR||$hasBR
+set settings(mouseInsideGameWindowFocuses) [expr {$hasRR||$hasBR}]
 
 
 # globals
