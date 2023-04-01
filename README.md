@@ -16,8 +16,10 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
 
 - Window Layout wizard and manual tweaking; get your game windows exactly how you want them to be to play.
 - Instant swapping of windows; with keyboard hotkeys for fast switching to the next or any specific window.
-- Left and right mouse click broadcasting option (press W or both buttons or hold them for more than half a second to avoid broadcasting)
+- Left and right mouse click broadcasting option (press W or both buttons or hold them for more than half a second (delay configurable in settings) to avoid broadcasting)
+   - For applications that do not support mouse events through PostMessage, uncheck "Mouse broadcast: message mode" in the Options menu.
 - **Key broadcasting** when turned on, with exclusions (e.g W A S D for movement from main window)
+   - Some applications/games do not accept PostMessage as a way to get input keys and you need to use OMB 5.2.7 with RoundRobin instead.
 - Secure text (password) broadcasting option (can also broadcast slash commands, etc)
 - Many additional options to switch which window your keys are going to:
   - Swap windows with hotkeys.

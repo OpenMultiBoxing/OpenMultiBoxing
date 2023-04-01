@@ -841,7 +841,7 @@ proc MenuSetup {} {
     $m3 add checkbutton -label "Auto reset after direct BR keys" -variable settings(autoResetDirect)
     $m3 add checkbutton -label "Always focus (if mixing click and RR)" -variable settings(rrAlwaysFocus)
     $m3 add separator
-    $m3 add checkbutton -label "Mouse broadcast uses message mode" -variable settings(mouseBroadcastUsePostMessage)
+    $m3 add checkbutton -label "Mouse broadcast: message mode" -variable settings(mouseBroadcastUsePostMessage)
     $m3 add separator
     $m3 add checkbutton -label "Pause when mouse is outside windows" -variable settings(mouseOutsideWindowsPauses)
     $m3 add checkbutton -label "Focus back when mouse in game window" -variable settings(mouseInsideGameWindowFocuses)
@@ -980,6 +980,7 @@ proc MouseArea {mouseCoords} {
     }
 }
 
+# Mousebroadcast main function
 proc ClickWindowRel {n xp yp button} {
     global settings slot2position slot2handle
     set WM_LBUTTONDOWN 0x0201
@@ -1097,7 +1098,7 @@ proc MouseBroadcastCheck {} {
                 continue
             }
             if {[info exists slot2handle($i)]} {
-                ClickWindowRel $i $xp $yp $clickButton
+                CheckWindow [list ClickWindowRel $i $xp $yp $clickButton] $i
             }
         }
         # bring back
@@ -2464,7 +2465,7 @@ proc BroadcastKey {keyCode {delayMs 100}} {
     set WM_KEYUP 0x0101
     foreach {n w} [array get slot2handle] {
         Debug "Sending input key $keyCode to $n ($w)"
-        twapi::PostMessage $w $WM_KEYDOWN $keyCode 1
+        CheckWindow [list twapi::PostMessage $w $WM_KEYDOWN $keyCode 1] $n
     }
     after $delayMs
     foreach {n w} [array get slot2handle] {
@@ -2486,7 +2487,7 @@ proc BroadcastKeyToOther {n keyCode up} {
         if {$i==$n} {
             continue
         }
-        twapi::PostMessage $w $ev $keyCode $lparam
+        CheckWindow [list twapi::PostMessage $w $ev $keyCode $lparam] $i
     }
 }
 
@@ -2679,14 +2680,20 @@ proc DeltaKeyboardState {oldState newState} {
 
 
 proc RRCheck {} {
-    global rrCodes rrCodesCustom rrCodesDirect rrExcludes rrLastCode rrLastCustom rrTaskId settings maxNumW
+    global rrCodes rrCodesCustom rrCodesDirect rrExcludes rrLastCode rrLastCustom rrTaskId settings maxNumW slot2position
     set rrTaskId [after $settings(rrInterval) RRCheck]
     #Debug "RR Check..."
     set n 1
-    if {![MouseIsIn]==$n} {
+    set m [MouseIsIn]
+    if {$m!=$n} {
         #Debug "Mouse not in $n"
         return
     }
+    if {![info exists slot2position(1)]} {
+        #Debug "No game window in slot 1"
+        return
+    }
+    set n $slot2position(1)
     foreach code $rrExcludes {
         set state [twapi::GetAsyncKeyState $code]
         if {$state != 0} {
@@ -2701,14 +2708,14 @@ proc RRCheck {} {
     #Debug "RRCheck: newUp $newUp newDown $newDown"
     set rrLastCode $curState
     foreach code $newUp {
-        Debug "Key $code now reset, sending up event"
+        Debug "Key $code now reset, sending up event to all but slot $n"
         BroadcastKeyToOther $n $code 1
     }
     foreach code $newDown {
-        Debug "Key $code now down, sending down event"
+        Debug "Key $code now down, sending down event to all but slot $n"
         BroadcastKeyToOther $n $code 0
     }
-
+}
 
     # direct on key down
     # set i 0
@@ -2732,7 +2739,7 @@ proc RRCheck {} {
     #         return
     #     }
     # }
-}
+
 
 proc FocusDirect {n} {
     global lastFocusWindow slot2position resetTaskId settings
