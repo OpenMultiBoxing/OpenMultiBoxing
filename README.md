@@ -20,6 +20,7 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
    - For applications that do not support mouse events through PostMessage, uncheck "Mouse broadcast: message mode" in the Options menu.
 - **Key broadcasting** when turned on, with exclusions (e.g W A S D for movement from main window)
    - Some applications/games do not accept PostMessage as a way to get input keys and you need to use OMB 5.2.7 with RoundRobin instead.
+- **Multi-PC** broadcasting: Select "Listen for other OMB connections" in the options menu on the main computer. Select "Connect to..." in the File menu on the other computers, type the main computer's name. On the main computer, accept the connection request from the other computers.
 - Secure text (password) broadcasting option (can also broadcast slash commands, etc)
 - Many additional options to switch which window your keys are going to:
   - Swap windows with hotkeys.
