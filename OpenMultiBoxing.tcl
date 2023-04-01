@@ -291,8 +291,10 @@ proc ConnectTo {destination} {
     Debug "Connected to $destination $master"
 }
 
+set networkPause 0
+
 proc Master {s} {
-    global master slot2handle settings
+    global master slot2handle settings networkPause
     set l [gets $s data]
     if {$l <= 0} {
         if {[eof $s]} {
@@ -304,7 +306,10 @@ proc Master {s} {
         Debug "Master empty read"
         return
     }
-    Debug "Master socket $s got data: $data"
+    Debug "Master socket $s pause $networkPause got data: $data"
+    if {$networkPause} {
+        return
+    }
     lassign $data cmd code
     switch $cmd {
         "CLICK" {
@@ -795,6 +800,9 @@ proc UISetup {} {
     tooltip .mf "Toggle focus follow mouse mode\nHotkey: $settings(hk,focusFollowMouse)"
     grid [ttk::checkbutton .mbc -text "Broadcast mouse clicks" -variable mouseBroadcast] -padx 4 -columnspan 2 -sticky w
     tooltip .mbc "Toggle mouse click broadcasting\nHotkey: $settings(hk,mouseBroadcast)"
+    grid [frame .sep3 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
+    grid [ttk::checkbutton .pauseNet -text "Pause network commands" -variable networkPause] -padx 4 -columnspan 2 -sticky ew
+    tooltip .pauseNet "When checked, network commands coming from \"$settings(connectTo)\" are ignored\nOnly applicable if using File>Connect to..."
     grid [ttk::label .l_bottom -textvariable bottomText -justify center -anchor c] -padx 2 -columnspan 2
     bind .l_bottom <ButtonPress> [list CheckForUpdates 0]
     tooltip .l_bottom "Click to check for update from $vers"
