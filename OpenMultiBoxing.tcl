@@ -243,6 +243,148 @@ proc CheckForUpdates {silent} {
 
 # -- UI
 
+proc Connect {} {
+    global settings connectTo
+    set t .connect
+    set connectTo $settings(connectTo)
+    EnableDisableWindows 0
+    toplevel $t
+    wm resizable $t 0 0
+    wm title $t "OMB Connect..."
+    ttk::label  $t.l -text "Connect to another OMB:"
+    ttk::entry  $t.e -textvar connectTo
+    $t.e selection range 0 end
+    bind $t.e <Return> {set doneDialog 1}
+    ttk::button $t.ok -text OK -command {set doneDialog 1}
+    ttk::button $t.cancel -text Cancel -command "set connectTo {}; set doneDialog 1"
+    bind $t.e <Escape> "$t.cancel invoke"
+    grid $t.l - -sticky news -padx 4 -pady 4
+    grid $t.e - -sticky news -padx 4 -pady 4
+    grid $t.ok $t.cancel -padx 4 -pady 4
+    focus $t.e
+    UpdateHandles
+    vwait doneDialog
+    destroy $t
+    EnableDisableWindows 1
+    if {$connectTo!=""} {
+        Debug "Connect dialog returned $connectTo"
+        set settings(connectTo) $connectTo
+        ConnectTo $connectTo
+    } else {
+        Debug "Connect cancelled"
+    }
+}
+
+proc ConnectTo {destination} {
+    global master settings
+    if {[info exists master]} {
+        Debug "Closing master socket $master"
+        close $master
+        unset master
+    }
+    if {[catch {set master [socket $destination $settings(listenPort)]} err]} {
+        OmbError "Connect error" "Couldn't connect to $destination:\n$err"
+        return
+    }
+    fconfigure $master -blocking 0 -translation binary -encoding binary
+    fileevent $master readable [list Master $master]
+    Debug "Connected to $destination $master"
+}
+
+proc Master {s} {
+    global master slot2handle settings
+    set l [gets $s data]
+    if {$l <= 0} {
+        if {[eof $s]} {
+            Debug "Master socket $s closed"
+            close $s
+            unset master
+            OmbError "No connection" "Lost/Rejected connection to master OMB"
+        }
+        Debug "Master empty read"
+        return
+    }
+    Debug "Master socket $s got data: $data"
+    lassign $data cmd code
+    switch $cmd {
+        "CLICK" {
+            set x $code
+            set y [lindex $data 2]
+            set button [lindex $data 3]
+            Debug "Master socket $s clicked $x $y $button"
+            for {set i 1} {$i<=$settings(numWindows)} {incr i} {
+                if {[info exists slot2handle($i)]} {
+                    CheckWindow [list ClickWindowRel $i $x $y $button] $i
+                }
+            }
+        }
+        "UP" {
+            BroadcastKeyToOther -1 $code 1
+        }
+        "DOWN" {
+            BroadcastKeyToOther -1 $code 0
+        }
+        default {
+            Debug "Master socket $s unknown command $cmd"
+            close $master
+            unset master
+            OmbError "Unknown command" "Master socket $s unknown command $data"
+        }
+    }
+}
+
+proc SendToClients {data} {
+    global clients
+    foreach client $clients {
+        if {[catch {puts -nonewline $client $data;flush $client} err]} {
+            set peer [fconfigure $client -peername]
+            close $client
+            set clients [lsearch -exact -not -inline $clients $client]
+            OmbError "Error sending to client" "Error sending to client $peer\n$err\n\n[llength $clients] client(s) remaining."
+        }
+    }
+}
+
+proc CloseSocket {} {
+    global socket
+    if {[info exists socket]} {
+        Debug "Closing listening socket $socket"
+        close $socket
+        unset socket
+    }
+}
+
+proc NetworkSetup {} {
+    global settings socket clients
+    if {![info exists clients]} {
+        set clients {}
+    }
+    CloseSocket
+    if {!$settings(listen)} {
+        foreach client $clients {
+            Debug "Closing client socket $client"
+            close $client
+        }
+        set clients {}
+        return
+    }
+    set port $settings(listenPort)
+    set socket [socket -server NewConnection $port]
+}
+
+proc NewConnection {channel clientaddr clientport} {
+    global settings clients
+    if {[OmbMessage -type yesno -icon question -title "Accept connection?" \
+            -message "Connection from $clientaddr ($clientport)\n\nDo you want to accept it?"]=="no"} {
+        Debug "Closing connection $channel from $clientaddr ($clientport)"
+        close $channel
+        return
+    }
+    fconfigure $channel -blocking 0 -translation binary -encoding binary
+    lappend clients $channel
+    Debug "Added connection $channel from $clientaddr ($clientport) to clients list: $clients"
+}
+
 proc NewProfile {} {
     global settings profileName
     set t .newProfile
@@ -791,6 +933,8 @@ proc MenuSetup {} {
     set m1 .mbar.file
     menu $m1 -tearoff 0
     .mbar add cascade -label File -menu $m1
+    $m1 add command -label "Connect to..." -command Connect
+    $m1 add separator
     $m1 add command -label "New Profile..." -command NewProfile
     $m1 add command -label "Edit raw settings..." -command EditSettings
     $m1 add command -label "Save settings" -command SaveSettings
@@ -823,15 +967,17 @@ proc MenuSetup {} {
     set m3 .mbar.options
     menu $m3 -tearoff 0
     .mbar add cascade -label Option -menu $m3
-    $m3 add checkbutton -label "Swap hotkey also focuses" -variable settings(swapAlsoFocus)
-    $m3 add checkbutton -label "Focus hotkey also foregrounds" -variable settings(focusAlsoFG)
     $m3 add checkbutton -label "Auto Capture Game windows" -variable settings(autoCapture)
     $m3 add checkbutton -label "Capture makes windows borderless" -variable settings(borderless)
-    $m3 add checkbutton -label "Auto Kill \"$settings(autoKillName)\"" -variable settings(autoKillOn)
     $m3 add checkbutton -label "Mouse auto foreground window" -variable mouseRaise -command UpdateMouseRaise
     $m3 add checkbutton -label "Turn off focus follow mouse on exit" -variable settings(mouseFocusOffAtExit)
     $m3 add checkbutton -label "Turn on focus follow mouse at startup" -variable settings(mouseFocusOnAtStart)
     $m3 add checkbutton -label "Auto open clipboard at startup" -variable settings(clipboardAtStart) -command {if {$settings(clipboardAtStart)} ClipboardManager}
+    $m3 add checkbutton -label "Listen for other OMB connections" -variable settings(listen) -command NetworkSetup
+    $m3 add separator
+    $m3 add checkbutton -label "Swap hotkey also focuses" -variable settings(swapAlsoFocus)
+    $m3 add checkbutton -label "Focus hotkey also foregrounds" -variable settings(focusAlsoFG)
+    $m3 add checkbutton -label "Auto Kill \"$settings(autoKillName)\"" -variable settings(autoKillOn)
     $m3 add separator
     $m3 add radiobutton -label "Auto reset focus to main: Off" -value 0 -variable settings(autoResetFocusToMain)
     $m3 add radiobutton -label "Auto reset focus to main: after 0.5 sec" -value 0.5 -variable settings(autoResetFocusToMain)
@@ -1094,6 +1240,7 @@ proc MouseBroadcastCheck {} {
         set yp [expr {1.0*($y-$ly)/$lh}]
         Debug "Clicked on $n in position $p is rel x $xp rel y $yp - $clickButton"
         # iterate move to other windows applying scale
+        SendToClients "CLICK $xp $yp $clickButton\n"
         for {set i 1} {$i<=$settings(numWindows)} {incr i} {
             if {$i==$n} {
                 continue
@@ -1886,7 +2033,7 @@ proc UpdateOurWindowHandles {} {
         }
         Debug "$w -> $wh -> $tl"
         set val 2
-        if {$w=="." || $w==".clip" || $w==".newProfile"} {
+        if {$w=="." || $w==".clip" || $w==".newProfile" || $w==".connect"} {
             Debug "Found $w to pause"
             set val 1
         }
@@ -2735,10 +2882,12 @@ proc RRCheck {} {
     foreach code $newUp {
         Debug "Key $code now reset, sending up event to all but slot $n"
         BroadcastKeyToOther $n $code 1
+        SendToClients "UP $code\n"
     }
     foreach code $newDown {
         Debug "Key $code now down, sending down event to all but slot $n"
         BroadcastKeyToOther $n $code 0
+        SendToClients "DOWN $code\n"
     }
 }
 
@@ -3696,6 +3845,9 @@ array set settings {
     mouseBroadcastDelay 30
     mouseHoldCancel 500
     mouseBroadcastUsePostMessage 1
+    connectTo ""
+    listenPort 4464
+    listen 0
 }
 #   rrKeyListAll ". F B T I \[ \] SPACE 1 2 3 4 5 6 7 8 9 0 - = UP LEFT RIGHT DOWN"
 #   rrKeyListCustom ". [ ] F11"
@@ -3807,3 +3959,5 @@ Defer 350 PeriodicChecks
 
 # For now not using cffi as it doesn't read full keyboard state anyway
 #Defer 300 CheckBinary
+
+Defer 500 NetworkSetup
