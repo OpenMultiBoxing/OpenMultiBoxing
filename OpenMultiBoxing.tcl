@@ -294,7 +294,7 @@ proc ConnectTo {destination} {
 set networkPause 0
 
 proc Master {s} {
-    global master slot2handle settings networkPause
+    global master slot2handle settings networkPause monitorInfo
     set l [gets $s data]
     if {$l <= 0} {
         if {[eof $s]} {
@@ -311,23 +311,48 @@ proc Master {s} {
         return
     }
     lassign $data cmd code
+    set numWindows $settings(numWindows)
     switch $cmd {
-        "CLICK" {
+        "MOUSE" {
             set x $code
             set y [lindex $data 2]
             set button [lindex $data 3]
             Debug "Master socket $s clicked $x $y $button"
-            for {set i 1} {$i<=$settings(numWindows)} {incr i} {
+            for {set i 1} {$i<=$numWindows} {incr i} {
                 if {[info exists slot2handle($i)]} {
                     CheckWindow [list ClickWindowRel $i $x $y $button] $i
                 }
             }
+            if {$numWindows<=0 || $button==""} {
+                # scale
+                set p [lindex [lindex $monitorInfo(mlist) 0] 0]
+                Debug "Using monitor $p"
+                set lx $monitorInfo($p,x1)
+                set ly $monitorInfo($p,y1)
+                set lw $monitorInfo($p,width)
+                set lh $monitorInfo($p,height)
+                set xx [expr {round($lx+$x*$lw)}]
+                set yy [expr {round($ly+$y*$lh)}]
+                Debug "Will click '$button' at $xx $yy on monitor $p (${lw}x${lh}@$lx,$ly)"
+                twapi::move_mouse $xx $yy
+                if {$button!=""} {
+                    twapi::click_mouse_button $button
+                }
+            }
         }
         "UP" {
-            BroadcastKeyToOther -1 $code 1
+            if {$numWindows<=1} {
+                twapi::send_input [list [list "keyup" $code 0]]
+            } else {
+                BroadcastKeyToOther -1 $code 1
+            }
         }
         "DOWN" {
-            BroadcastKeyToOther -1 $code 0
+            if {$numWindows<=1} {
+                twapi::send_input [list [list "keydown" $code 0]]
+            } else {
+                BroadcastKeyToOther -1 $code 0
+            }
         }
         default {
             Debug "Master socket $s unknown command $cmd"
@@ -996,6 +1021,7 @@ proc MenuSetup {} {
     $m3 add checkbutton -label "Always focus (if mixing click and RR)" -variable settings(rrAlwaysFocus)
     $m3 add separator
     $m3 add checkbutton -label "Mouse broadcast: message mode" -variable settings(mouseBroadcastUsePostMessage)
+    $m3 add checkbutton -label "Mouse broadcast: remote track movement" -variable settings(mouseBroadcastNetTrack)
     $m3 add separator
     $m3 add checkbutton -label "Pause when mouse is outside windows" -variable settings(mouseOutsideWindowsPauses)
     $m3 add checkbutton -label "Focus back when mouse in game window" -variable settings(mouseInsideGameWindowFocuses)
@@ -1182,8 +1208,10 @@ set clickInProgress ""
 set mouseBeforeClick ""
 set clickButton ""
 set clickWhen 0
+set lastMouseCoords {}
+
 proc MouseBroadcastCheck {} {
-    global mouseBeforeClick clickInProgress settings slot2position slot2handle isPaused clickButton clickWhen
+    global mouseBeforeClick clickInProgress settings slot2position slot2handle isPaused clickButton clickWhen lastMouseCoords
     set VK_LBUTTON 0x01
     set VK_RBUTTON 0x02
     set W_KEY 0x57
@@ -1195,6 +1223,27 @@ proc MouseBroadcastCheck {} {
     if {[catch {twapi::get_mouse_location} lMouse]} {
         # access denied while in lock screen etc
         return
+    }
+    if {$settings(mouseBroadcastNetTrack) && $lMouse!=$lastMouseCoords} {
+        set lastMouseCoords $lMouse
+        # No button == move
+        lassign $lMouse x y
+        # copy-pasta from below...
+        # Find window
+        set w [twapi::get_window_at_location $x $y]
+        set wType [IsOurs $w]
+        #Debug "Window clicked is $w: $wType"
+        if {$wType>=3} {
+            set n [expr {$wType-2}]
+            set p $slot2position($n)
+            # scale
+            lassign $settings($p,posXY) lx ly
+            lassign $settings($p,size) lw lh
+            set xp [expr {1.0*($x-$lx)/$lw}]
+            set yp [expr {1.0*($y-$ly)/$lh}]
+            Debug "Move on $n in position $p is rel x $xp rel y $yp"
+            SendToClients "MOUSE $xp $yp\n"
+        }
     }
     set stateL [twapi::GetAsyncKeyState $VK_LBUTTON]
     set stateR [twapi::GetAsyncKeyState $VK_RBUTTON]
@@ -1248,7 +1297,7 @@ proc MouseBroadcastCheck {} {
         set yp [expr {1.0*($y-$ly)/$lh}]
         Debug "Clicked on $n in position $p is rel x $xp rel y $yp - $clickButton"
         # iterate move to other windows applying scale
-        SendToClients "CLICK $xp $yp $clickButton\n"
+        SendToClients "MOUSE $xp $yp $clickButton\n"
         for {set i 1} {$i<=$settings(numWindows)} {incr i} {
             if {$i==$n} {
                 continue
@@ -1274,7 +1323,7 @@ set pauseSchedule {}
 
 proc PeriodicChecks {} {
     global settings isPaused prevRR prevMF prevOL prevRRMouse hasRR hasBR rrOn rrMouse mouseFollow\
-         maxNumW pauseSchedule lastFocusWindow slot2handle mouseBroadcast
+         maxNumW pauseSchedule lastFocusWindow slot2handle mouseBroadcast prevNP networkPause
     after cancel $pauseSchedule
     set pauseSchedule {}
     if {$settings(autoCapture) && ($maxNumW<=$settings(numWindows))} {
@@ -1300,6 +1349,10 @@ proc PeriodicChecks {} {
             set prevMF 0
             set prevOL 0
             set prevRRMouse 0
+            set prevNP $networkPause
+            if {!$networkPause} {
+                set networkPause 1
+            }
             if {$mouseFollow} {
                 set mouseFollow 0
                 UpdateMouseFollow
@@ -1319,7 +1372,8 @@ proc PeriodicChecks {} {
             }
             # can't seem to raise our own window...
         } else {
-            Debug "Restoring $prevRR $prevMF $prevOL $prevRRMouse"
+            Debug "Restoring $prevRR $prevMF $prevOL $prevRRMouse $prevNP"
+            set networkPause $prevNP
             if {$prevRR && !$rrOn} {
                 RRToggle
             }
