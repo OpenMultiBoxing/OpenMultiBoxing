@@ -803,7 +803,7 @@ proc UISetup {} {
         tooltip .eRR2 "Which modifiers pause $rrlabel while held\nHit <Return> after change to take effect.\nSee help/FAQ for list."
         bind .eRR2 <Return> RRKeysListChange
 
-        grid [ttk::label .lBMap -text "Key remapping"] -padx 4 -columnspan 2 -sticky w
+        grid [ttk::label .lBMap -text "Key remapping (: separated list)"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eBMap -textvariable settings(broadcastMap) -width $width] -columnspan 2 -padx 4 -sticky ew
         tooltip .eBMap "Key mapping from key pressed to key broadcast\nFor instance F:T will send T to other windows when F is pressed"
         bind .eBMap <Return> RRKeysListChange
