@@ -2703,6 +2703,7 @@ proc BroadcastKeyToOther {n keyCode up} {
     }
     # Remap key if needed
     if {[info exists broadcastMap($keyCode)]} {
+        Debug "Remapping $keyCode to $broadcastMap($keyCode)"
         set keyCode $broadcastMap($keyCode)
     }
     foreach {i w} [array get slot2handle] {
