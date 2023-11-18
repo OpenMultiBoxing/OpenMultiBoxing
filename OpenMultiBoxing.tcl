@@ -1960,7 +1960,7 @@ proc UpdateN {n} {
     set raised [Update $wh $lx $ly $lw $lh $lstayOnTop]
     if {$settings(showOverlay) && [winfo exists .o$p]} {
         .o$p.l configure -text $n
-        if {$p!=1} {
+        if {$p!=1 && $settings(overlayClickable)} {
             bind .o$p.l <ButtonPress> [list SetAsMain $n]
         }
         if {$raised} {
