@@ -3247,6 +3247,15 @@ proc SetClickThrough {t} {
     Debug "$t : $wh : [twapi::get_window_style $wh]"
 }
 
+proc ResetOverlay {} {
+    global settings
+    for {set i 1} {$i<=$settings(layoutMaxWindows)} {incr i} {
+        set t .o$i
+        catch {destroy $t}
+    }
+    Overlay
+}
+
 set rrOnLabel ""
 proc Overlay {} {
     global settings rrOnLabel
@@ -3351,6 +3360,7 @@ proc ResetAll {} {
         set nextWindow $maxNumW
     }
     UpdateHandles
+    ResetOverlay
     CheckAutoKill
     Debug "All reset complete: lg $lastGood, fb $firstBad, mx $maxNumW, next $nextWindow"
 }
