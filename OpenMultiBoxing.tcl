@@ -1791,6 +1791,8 @@ proc FindOtherCopy {} {
 array set slot2handle {}
 # wow windows handle slots - on screen/current position
 array set slot2position {}
+# focus window handle for each application window
+array set slot2focus {}
 
 proc FocusN {n fg {update 1}} {
     global slot2handle slot2position focusWindow lastFocusWindow settings hasRR hasBR
@@ -2237,8 +2239,34 @@ proc RegisterPerWindowHotkey {n wname} {
     }
 }
 
+proc setFocusHandle {n} {
+    global slot2focus slot2handle
+    if {![info exists slot2handle($n)]} {
+        return
+    }
+    set w $slot2handle($n)
+    Foreground $w
+    set tid [twapi::get_window_thread $w]
+    set focusHandle [twapi::get_focus_window_for_thread $tid]
+    Debug "NEWY Focus for $n is $focusHandle, tid $tid"
+    if {$focusHandle != $twapi::null_hwin} {
+        set slot2focus($n) $focusHandle
+    } else {
+        set slot2focus($n) $w
+    }
+}
+
 proc updateListBox {n w wname} {
-    global ourWindowHandles slot2handle slot2position nextWindow maxNumW settings
+    global ourWindowHandles slot2handle slot2position nextWindow maxNumW settings slot2focus
+    Foreground $w
+    set tid [twapi::get_window_thread $w]
+    set focusHandle [twapi::get_focus_window_for_thread $tid]
+    Debug "NEWX Focus for $n is $focusHandle, tid $tid"
+    if {$focusHandle != $twapi::null_hwin} {
+        set slot2focus($n) $focusHandle
+    } else {
+        set slot2focus($n) $w
+    }
     set slot2handle($n) $w
     set slot2position($n) $n
     set ourWindowHandles($w) [expr 2+$n]
@@ -2678,16 +2706,18 @@ proc BroadcastText {text {addEnterKey 0}} {
 # BroadcastKey 0x26 500
 
 proc BroadcastKey {keyCode {delayMs 100}} {
-    global slot2handle
+    global slot2handle slot2focus
     set WM_KEYDOWN 0x0100
     set WM_KEYUP 0x0101
     foreach {n w} [array get slot2handle] {
-        Debug "Sending input key $keyCode to $n ($w)"
-        CheckWindow [list twapi::PostMessage $w $WM_KEYDOWN $keyCode 1] $n
+        set fh $slot2focus($n)
+        Debug "Sending input key $keyCode to $n ($w $fh)"
+        CheckWindow [list twapi::PostMessage $fh $WM_KEYDOWN $keyCode 1] $n
     }
     after $delayMs
     foreach {n w} [array get slot2handle] {
-        twapi::PostMessage $w $WM_KEYUP $keyCode 1
+        set fh $slot2focus($n)
+        twapi::PostMessage $fh $WM_KEYUP $keyCode 1
     }
     # could also use twapi::send_input but that changes fg/active window
 }
@@ -2695,7 +2725,7 @@ proc BroadcastKey {keyCode {delayMs 100}} {
 # Send key to all windows except the one with the given slot number
 # Use up=1 for key up, up=0 for key down
 proc BroadcastKeyToOther {n keyCode up} {
-    global slot2handle broadcastMap
+    global slot2handle broadcastMap slot2focus
     set ev [expr {0x0100+$up}]
     set lparam 0
     if {$up} {
@@ -2710,7 +2740,9 @@ proc BroadcastKeyToOther {n keyCode up} {
         if {$i==$n} {
             continue
         }
-        CheckWindow [list twapi::PostMessage $w $ev $keyCode $lparam] $i
+        set fh $slot2focus($i)
+        # Debug "Sending input key $keyCode to $i ($w $fh)"
+        CheckWindow [list twapi::PostMessage $fh $ev $keyCode $lparam] $i
     }
 }
 
