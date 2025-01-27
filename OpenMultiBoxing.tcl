@@ -2241,6 +2241,10 @@ proc RegisterPerWindowHotkey {n wname} {
     }
 }
 
+proc validHandle {w} {
+    expr {$w != $twapi::null_hwin && $w != "0 HWND"}
+}
+
 proc setFocusHandle {n} {
     global slot2focus slot2handle
     if {![info exists slot2handle($n)]} {
@@ -2251,7 +2255,7 @@ proc setFocusHandle {n} {
     set tid [twapi::get_window_thread $w]
     set focusHandle [twapi::get_focus_window_for_thread $tid]
     Debug "NEWY Focus for $n is $focusHandle, tid $tid"
-    if {$focusHandle != $twapi::null_hwin} {
+    if {[validHandle $focusHandle]} {
         set slot2focus($n) $focusHandle
     } else {
         set slot2focus($n) $w
@@ -2264,7 +2268,7 @@ proc updateListBox {n w wname} {
     set tid [twapi::get_window_thread $w]
     set focusHandle [twapi::get_focus_window_for_thread $tid]
     Debug "NEWX Focus for $n is $focusHandle, tid $tid"
-    if {$focusHandle != $twapi::null_hwin} {
+    if {[validHandle $focusHandle]} {
         set slot2focus($n) $focusHandle
     } else {
         set slot2focus($n) $w
