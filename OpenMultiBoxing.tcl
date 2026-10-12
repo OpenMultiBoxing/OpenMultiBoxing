@@ -559,11 +559,12 @@ proc LoadSettings {} {
 }
 
 proc UnregisterHotkeys {} {
-    global allHotKeys
+    global allHotKeys hotkeyCombo
     Debug "Unregistering previous hotkeys"
     foreach hk $allHotKeys {
         twapi::unregister_hotkey $hk
     }
+    array unset hotkeyCombo *
 }
 
 
@@ -1027,6 +1028,7 @@ proc MenuSetup {} {
     $m3 add radiobutton -label "Auto reset focus to main: after 3 sec" -value 3 -variable settings(autoResetFocusToMain)
     $m3 add checkbutton -label "Auto reset after direct BR keys" -variable settings(autoResetDirect)
     $m3 add checkbutton -label "Always focus (if mixing click and RR)" -variable settings(rrAlwaysFocus)
+    $m3 add checkbutton -label "Key broadcast: send modifiers only with a key" -variable settings(rrDeferModifiers)
     $m3 add separator
     $m3 add checkbutton -label "Mouse broadcast: message mode" -variable settings(mouseBroadcastUsePostMessage)
     $m3 add checkbutton -label "Mouse broadcast: remote track movement" -variable settings(mouseBroadcastNetTrack)
@@ -1725,17 +1727,55 @@ proc EditSettings {} {
 
 # Hotkeys
 proc HandleHotKey {msg cb} {
-    global hotkeyOk
+    global hotkeyOk rrOn rrLastCode
     Debug "Hotkey ok=$hotkeyOk for $msg - $cb"
+    if {$rrOn} {
+        # Release the hotkey's modifiers already broadcast before focus changes
+        # and mark the currently held keys as seen so the hotkey's key itself isn't broadcast
+        ReleaseBroadcastKeys
+        set rrLastCode [GetKeyboardState]
+        # still held modifiers (e.g. Ctrl-~ Ctrl-~ 1) go with the next key
+        PendHeldModifiers
+    }
     if $hotkeyOk $cb
 }
 
 if {![info exists allHotKeys]} {
     set allHotKeys {}
 }
+# hotkeyCombo(modifiersMask,vk) -> hotkey description, so broadcasting can skip our own hotkeys
+array set hotkeyCombo {}
+
+# Returns {modifiersMask vk} (MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8) for a hotkey
+# like Ctrl-Shift-F1 or Ctrl-0xC0, or empty if not understood
+proc HotkeyToModsVk {hk} {
+    twapi::_init_vk_map
+    set mods 0
+    set parts [split $hk "-"]
+    foreach m [lrange $parts 0 end-1] {
+        switch -nocase -- $m {
+            ctrl - control {set mods [expr {$mods|2}]}
+            alt - menu {set mods [expr {$mods|1}]}
+            shift {set mods [expr {$mods|4}]}
+            win - lwin - rwin {set mods [expr {$mods|8}]}
+            default {return}
+        }
+    }
+    set k [lindex $parts end]
+    if {[string is integer -strict $k]} {
+        set vk [expr {$k}]
+    } elseif {[string length $k] == 1} {
+        lassign [twapi::VkKeyScan $k] x vk
+    } elseif {[info exists twapi::vk_map([string toupper $k])]} {
+        set vk [expr [lindex $twapi::vk_map([string toupper $k]) 0]]
+    } else {
+        return
+    }
+    list $mods $vk
+}
 
 proc RegisterHotkey {msg var callback} {
-    global settings allHotKeys
+    global settings allHotKeys hotkeyCombo
     set hk $settings($var)
     Debug "RegisterHotkey $hk $msg $var $callback"
     if {$hk == ""} {
@@ -1746,6 +1786,13 @@ proc RegisterHotkey {msg var callback} {
         puts "hotkey error $hk for $msg: $err"
         OmbError "OpenMultiBoxing HotKey error" \
          "Conflict for hotkey for $msg, change $var in settings to use something different than $hk"
+    } else {
+        lassign [HotkeyToModsVk $hk] mods vk
+        if {$vk != ""} {
+            set hotkeyCombo($mods,$vk) $msg
+        } else {
+            Debug "Couldn't parse hotkey $hk for broadcast skipping"
+        }
     }
     lappend allHotKeys $err
 }
@@ -2728,28 +2775,59 @@ proc BroadcastKey {keyCode {delayMs 100}} {
     # could also use twapi::send_input but that changes fg/active window
 }
 
-# Send key to all windows except the one with the given slot number
-# Use up=1 for key up, up=0 for key down
-proc BroadcastKeyToOther {n keyCode up} {
-    global slot2handle broadcastMap slot2focus
+# Post key down/up to the window in slot i and track which keys we left down in which window
+proc PostKeyToSlot {i keyCode up} {
+    global slot2focus sentDown
     set ev [expr {0x0100+$up}]
-    set lparam 0
     if {$up} {
         set lparam 0xC0000001
+        unset -nocomplain sentDown($i,$keyCode)
+    } else {
+        set lparam 0
+        set sentDown($i,$keyCode) 1
     }
+    CheckWindow [list twapi::PostMessage $slot2focus($i) $ev $keyCode $lparam] $i
+}
+
+# Send key down to all windows except the one with the given slot number
+# Key up goes to all windows that got the down, including the focused one,
+# as focus may have changed in between (e.g. Ctrl-~ swap), otherwise the key stays stuck.
+# Use up=1 for key up, up=0 for key down
+proc BroadcastKeyToOther {n keyCode up} {
+    global slot2handle broadcastMap sentDown
     # Remap key if needed
     if {[info exists broadcastMap($keyCode)]} {
         Debug "Remapping $keyCode to $broadcastMap($keyCode)"
         set keyCode $broadcastMap($keyCode)
     }
     foreach {i w} [array get slot2handle] {
-        if {$i==$n} {
+        if {$up} {
+            if {![info exists sentDown($i,$keyCode)]} {
+                continue
+            }
+        } elseif {$i==$n} {
             continue
         }
-        set fh $slot2focus($i)
-        # Debug "Sending input key $keyCode to $i ($w $fh)"
-        CheckWindow [list twapi::PostMessage $fh $ev $keyCode $lparam] $i
+        PostKeyToSlot $i $keyCode $up
     }
+}
+
+# Send key up for all the keys we posted down and not up yet
+# (before hotkeys change focus and when broadcasting is turned off/paused)
+proc ReleaseBroadcastKeys {} {
+    global sentDown slot2handle rrSentDown
+    foreach k [array names sentDown] {
+        lassign [split $k ","] i keyCode
+        if {[info exists slot2handle($i)]} {
+            Debug "Releasing key $keyCode for $i"
+            PostKeyToSlot $i $keyCode 1
+        }
+    }
+    array unset sentDown *
+    foreach code [array names rrSentDown] {
+        SendToClients "UP $code\n"
+    }
+    array unset rrSentDown *
 }
 
 # Unfortunatly this does not work (mouse coords are not used, it only clicks where the mouse really is)
@@ -2831,8 +2909,10 @@ proc RRreadAllKeys {} {
 }
 
 proc RRUpdate {} {
-    global rrOn rrOnLabel settings hasRR hasBR mouseFollow rrMouse rrLastCode rrTaskId mouseBroadcast
+    global rrOn rrOnLabel settings hasRR hasBR mouseFollow rrMouse rrLastCode rrTaskId mouseBroadcast rrPendingMods
     Debug "RRupdate $rrOn"
+    ReleaseBroadcastKeys
+    array unset rrPendingMods *
     if {[info exists rrTaskId]} {
         after cancel $rrTaskId
         unset rrTaskId
@@ -2864,6 +2944,10 @@ proc RRUpdate {} {
     # read twice
     GetKeyboardState
     set rrLastCode [GetKeyboardState]
+    if {$rrOn} {
+        # e.g. pause/resume when a swap moves windows under the mouse
+        PendHeldModifiers
+    }
     Debug "Reset all Broadcasting key states"
 }
 
@@ -2912,6 +2996,14 @@ set rrExcludes {}
 set rrCodesCustom {}
 set rrCodesDirect {}
 array set broadcastMap {}
+# sentDown(slot,keyCode) exists when we posted key down to that slot without the up yet
+array set sentDown {}
+# rrSentDown(keyCode): broadcast down (to windows/clients) without up yet
+array set rrSentDown {}
+# rrPendingMods(keyCode): modifiers held but not broadcast until a non modifier key is pressed
+array set rrPendingMods {}
+# Slot of the game window that had focus at the last broadcast check
+set rrLastFocus 0
 
 proc RRKeysListChange {} {
     twapi::_init_vk_map
@@ -3017,12 +3109,27 @@ proc FocusIn {} {
 # Main broadcast setup
 proc RRCheck {} {
     global rrCodes rrCodesCustom rrCodesDirect rrExcludes rrLastCode rrLastCustom rrTaskId settings maxNumW slot2position
+    global rrPendingMods rrSentDown hotkeyCombo rrLastFocus broadcastMap
     set rrTaskId [after $settings(rrInterval) RRCheck]
     #Debug "RR Check..."
     set n [FocusIn]
     if {$n<=0} {
         #Debug "Mouse not in game window"
+        set rrLastFocus 0
         return
+    }
+    if {$n != $rrLastFocus} {
+        set rrLastFocus $n
+        # The newly focused window missed the down of modifiers pressed before it got focus (e.g. Ctrl of Ctrl-~ swap)
+        foreach code [HeldBroadcastModifiers] {
+            Debug "Modifier $code held while focus changed to $n, sending it down there"
+            set rcode $code
+            if {[info exists broadcastMap($code)]} {
+                set rcode $broadcastMap($code)
+            }
+            PostKeyToSlot $n $rcode 0
+            set rrSentDown($code) 1
+        }
     }
     foreach code $rrExcludes {
         set state [twapi::GetAsyncKeyState $code]
@@ -3038,15 +3145,111 @@ proc RRCheck {} {
     #Debug "RRCheck: newUp $newUp newDown $newDown"
     set rrLastCode $curState
     foreach code $newUp {
-        Debug "Key $code now reset, sending up event to all but slot $n"
-        BroadcastKeyToOther $n $code 1
-        SendToClients "UP $code\n"
+        unset -nocomplain rrPendingMods($code)
+        if {![info exists rrSentDown($code)]} {
+            # deferred modifier, hotkey key, etc... that we never sent down
+            Debug "Key $code now reset, wasn't broadcast"
+            continue
+        }
+        Debug "Key $code now reset, sending up event to windows that got the down"
+        BroadcastKeyEvent $n $code 1
     }
+    # Process modifiers first so they are pending before a key pressed in the same check
+    set mods {}
+    set keys {}
     foreach code $newDown {
+        if {[IsModifierKey $code]} {
+            lappend mods $code
+        } else {
+            lappend keys $code
+        }
+    }
+    foreach code $mods {
+        if {$settings(rrDeferModifiers)} {
+            Debug "Modifier $code now down, deferring until a key is pressed"
+            set rrPendingMods($code) 1
+            continue
+        }
+        Debug "Modifier $code now down, sending down event to all but slot $n"
+        BroadcastKeyEvent $n $code 0
+    }
+    foreach code $keys {
+        set mask [HeldModifiersMask]
+        if {[info exists hotkeyCombo($mask,$code)]} {
+            Debug "Key $code is our \"$hotkeyCombo($mask,$code)\" hotkey, not broadcasting"
+            continue
+        }
+        if {[IsSystemCombo $mask $code]} {
+            Debug "Key $code with modifiers $mask is a Windows shortcut, not broadcasting"
+            continue
+        }
+        foreach mod [array names rrPendingMods] {
+            Debug "Sending deferred modifier $mod down to all but slot $n"
+            BroadcastKeyEvent $n $mod 0
+        }
+        array unset rrPendingMods *
         Debug "Key $code now down, sending down event to all but slot $n"
-        BroadcastKeyToOther $n $code 0
+        BroadcastKeyEvent $n $code 0
+    }
+}
+
+# Broadcast key down/up to the other windows and the network clients
+proc BroadcastKeyEvent {n code up} {
+    global rrSentDown
+    BroadcastKeyToOther $n $code $up
+    if {$up} {
+        unset -nocomplain rrSentDown($code)
+        SendToClients "UP $code\n"
+    } else {
+        set rrSentDown($code) 1
         SendToClients "DOWN $code\n"
     }
+}
+
+# L/R Shift, Ctrl, Alt and Windows keys
+proc IsModifierKey {code} {
+    expr {($code >= 0xA0 && $code <= 0xA5) || $code == 0x5B || $code == 0x5C}
+}
+
+# Currently held modifiers that are broadcast (not ignored nor pausing broadcast like RCONTROL by default)
+proc HeldBroadcastModifiers {} {
+    global ignoredKeyCode rrExcludes
+    set res {}
+    foreach code {0xA0 0xA1 0xA2 0xA3 0xA4 0xA5 0x5B 0x5C} {
+        set code [expr {$code}]
+        if {[info exists ignoredKeyCode($code)] || [lsearch -exact $rrExcludes $code] >= 0} {
+            continue
+        }
+        if {[twapi::GetAsyncKeyState $code] & 0x8000} {
+            lappend res $code
+        }
+    }
+    return $res
+}
+
+# Held modifiers that the windows don't (or no longer) have: send them with the next broadcast key
+proc PendHeldModifiers {} {
+    global rrPendingMods
+    foreach code [HeldBroadcastModifiers] {
+        set rrPendingMods($code) 1
+    }
+}
+
+# Windows' own shortcuts (Alt-Tab, Alt-Esc, Ctrl-Esc, Win-anything), not meant for the game windows
+proc IsSystemCombo {mask code} {
+    expr {($mask & 8) || (($mask & 1) && ($code == 0x09 || $code == 0x1B)) || ($mask == 2 && $code == 0x1B)}
+}
+
+# Currently held modifiers as RegisterHotKey's MOD_ALT 1 | MOD_CONTROL 2 | MOD_SHIFT 4 | MOD_WIN 8
+proc HeldModifiersMask {} {
+    set mask 0
+    foreach {vk bit} {0x12 1 0x11 2 0x10 4 0x5B 8 0x5C 8} {
+        # high bit is "currently down" (low bit is "pressed since last call")
+        if {[twapi::GetAsyncKeyState $vk] & 0x8000} {
+            set mask [expr {$mask | $bit}]
+        }
+    }
+    return $mask
 }
 
     # direct on key down
@@ -4013,6 +4216,7 @@ array set settings {
     mouseBroadcastDelay 30
     mouseHoldCancel 500
     mouseBroadcastUsePostMessage 1
+    rrDeferModifiers 1
     connectTo ""
     listenPort 4464
     listen 0
