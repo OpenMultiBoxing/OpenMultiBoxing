@@ -318,8 +318,9 @@ proc Master {s} {
             set y [lindex $data 2]
             set button [lindex $data 3]
             Debug "Master socket $s clicked $x $y $button"
+            set skip [RRExcludedWindows]
             for {set i 1} {$i<=$numWindows} {incr i} {
-                if {[info exists slot2handle($i)]} {
+                if {[info exists slot2handle($i)] && [lsearch -exact $skip $i] < 0} {
                     CheckWindow [list ClickWindowRel $i $x $y $button] $i
                 }
             }
@@ -564,6 +565,7 @@ proc UnregisterHotkeys {} {
     foreach hk $allHotKeys {
         twapi::unregister_hotkey $hk
     }
+    set allHotKeys {}
     array unset hotkeyCombo *
 }
 
@@ -627,6 +629,21 @@ proc AfterSettings {} {
         }
         unset settings(overlayBig)
     }
+    RegisterAllHotkeys
+    # Set mouse control to current values
+    global mouseFollow mouseRaise mouseDelay
+    set mouseDelay [GetMouseDelay]
+    set mouseFollow [GetFocusFollowMouse]
+    set mouseRaise [GetMouseRaise]
+    LoadLayout
+    Overlay
+    RRCustomMenu
+    RRExcludeUpdate
+    Debug "Settings (re)Loaded."
+}
+
+proc RegisterAllHotkeys {} {
+    global settings maxNumW slot2handle
     UnregisterHotkeys
     RegisterHotkey "Capture" hk,capture CaptureOrUpdate
     RegisterHotkey "Start/Stop mouse tracking" hk,mouseTrack MouseTracking
@@ -641,20 +658,15 @@ proc AfterSettings {} {
     RegisterHotkey "Focus main window" hk,focusMain FocusMain
     RegisterHotkey "Reset all windows to saved positions" hk,resetAll ResetAll
     RegisterHotkey "Start/Stop mouse broadcasting" hk,mouseBroadcast MouseBroadcast
+    # Only take that hotkey from other apps when windows to skip are configured
+    if {[llength $settings(rrExcludeWindows)]} {
+        RegisterHotkey "Skip windows toggle" hk,rrExcludeToggle RRExcludeToggle
+    }
     for {set n 1} {$n < $maxNumW} {incr n} {
         if {[info exists slot2handle($n)]} {
             RegisterPerWindowHotkey $n "OMB $n"
         }
     }
-    # Set mouse control to current values
-    global mouseFollow mouseRaise mouseDelay
-    set mouseDelay [GetMouseDelay]
-    set mouseFollow [GetFocusFollowMouse]
-    set mouseRaise [GetMouseRaise]
-    LoadLayout
-    Overlay
-    RRCustomMenu
-    Debug "Settings (re)Loaded."
 }
 
 set prevMF 0
@@ -808,6 +820,18 @@ proc UISetup {} {
         grid [entry .eBMap -textvariable settings(broadcastMap) -width $width] -columnspan 2 -padx 4 -sticky ew
         tooltip .eBMap "Key mapping from key pressed to key broadcast\nFor instance F:T will send T to other windows when F is pressed"
         bind .eBMap <Return> RRKeysListChange
+
+        frame .rrX
+        ttk::checkbutton .rrX.cb -text "Skip ($settings(hk,rrExcludeToggle)):" \
+            -variable settings(rrExcludeWindowsOn) -command "RRExcludeUpdate; SaveSettings"
+        tooltip .rrX.cb "When checked, keys and mouse clicks are not $rrlabel to the selected windows\nUnchecked: $rrlabel to all windows\nOnly available once windows are selected\nHotkey: $settings(hk,rrExcludeToggle)"
+        ttk::menubutton .rrX.mb -textvariable rrExcludeText -menu .rrX.mb.menu
+        menu .rrX.mb.menu -tearoff 0 -postcommand RRExcludeMenu
+        tooltip .rrX.mb "Select which window(s) don't get $rrlabel keys and mouse clicks\nThis follows the window (OMB number) when swapped"
+        pack .rrX.cb -side left
+        pack .rrX.mb -side left -fill x -expand 1 -padx {4 0}
+        grid .rrX -padx 4 -columnspan 2 -sticky ew
+        RRExcludeUpdate
 
         # (old wob) RR stuff that's not working in broadcast OMB
 
@@ -1308,8 +1332,9 @@ proc MouseBroadcastCheck {} {
         Debug "Clicked on $n in position $p is rel x $xp rel y $yp - $clickButton"
         # iterate move to other windows applying scale
         SendToClients "MOUSE $xp $yp $clickButton\n"
+        set skip [RRExcludedWindows]
         for {set i 1} {$i<=$settings(numWindows)} {incr i} {
-            if {$i==$n} {
+            if {$i==$n || [lsearch -exact $skip $i] >= 0} {
                 continue
             }
             if {[info exists slot2handle($i)]} {
@@ -1787,6 +1812,7 @@ proc RegisterHotkey {msg var callback} {
         OmbError "OpenMultiBoxing HotKey error" \
          "Conflict for hotkey for $msg, change $var in settings to use something different than $hk"
     } else {
+        lappend allHotKeys $err
         lassign [HotkeyToModsVk $hk] mods vk
         if {$vk != ""} {
             set hotkeyCombo($mods,$vk) $msg
@@ -1794,7 +1820,6 @@ proc RegisterHotkey {msg var callback} {
             Debug "Couldn't parse hotkey $hk for broadcast skipping"
         }
     }
-    lappend allHotKeys $err
 }
 
 proc FindOtherCopy {} {
@@ -2800,12 +2825,13 @@ proc BroadcastKeyToOther {n keyCode up} {
         Debug "Remapping $keyCode to $broadcastMap($keyCode)"
         set keyCode $broadcastMap($keyCode)
     }
+    set skip [RRExcludedWindows]
     foreach {i w} [array get slot2handle] {
         if {$up} {
             if {![info exists sentDown($i,$keyCode)]} {
                 continue
             }
-        } elseif {$i==$n} {
+        } elseif {$i==$n || [lsearch -exact $skip $i] >= 0} {
             continue
         }
         PostKeyToSlot $i $keyCode $up
@@ -2919,7 +2945,7 @@ proc RRUpdate {} {
     }
     set rrLastCode {}
     if {$rrOn && $hasRR} {
-        set rrOnLabel $settings(rrIndicator,label)
+        set rrOnLabel [RRIndicatorLabel]
         RRKeysListChange
         RRreadAllKeys
         set rrMouse $mouseFollow
@@ -3332,6 +3358,92 @@ proc RRCustomMenu {} {
     for {set i 1} {$i<=$settings(numWindows)} {incr i} {
         $m add checkbutton -label "OMB $i" -variable rrCustom($i) -command RRCustomUpdateSettings
     }
+}
+
+# --- Skip windows: windows (OMB numbers, so it follows them when swapped) that don't get broadcast keys/clicks
+
+# Windows currently skipped by broadcasting (empty when not configured or toggled off)
+proc RRExcludedWindows {} {
+    global settings
+    if {!$settings(rrExcludeWindowsOn)} {
+        return {}
+    }
+    return $settings(rrExcludeWindows)
+}
+
+# Overlay broadcast indicator, e.g. "⟳ -4,5" when skipping windows 4 and 5
+proc RRIndicatorLabel {} {
+    global settings
+    set label $settings(rrIndicator,label)
+    set skip [RRExcludedWindows]
+    if {[llength $skip]} {
+        append label " -[join $skip ,]"
+    }
+    return $label
+}
+
+proc RRExcludeToggle {} {
+    global settings
+    set settings(rrExcludeWindowsOn) [expr {!$settings(rrExcludeWindowsOn)}]
+    RRExcludeUpdate
+    SaveSettings
+}
+
+# Sync the UI and overlay with the skip windows settings
+proc RRExcludeUpdate {} {
+    global settings rrExcludeText rrOn rrOnLabel
+    set skip $settings(rrExcludeWindows)
+    Debug "Skip windows: [join $skip ,] on=$settings(rrExcludeWindowsOn)"
+    if {[llength $skip]} {
+        set rrExcludeText [join $skip {, }]
+        set state normal
+    } else {
+        set rrExcludeText "None"
+        set state disabled
+    }
+    if {[winfo exists .rrX.cb]} {
+        .rrX.cb configure -state $state
+    }
+    if {$rrOn} {
+        set rrOnLabel [RRIndicatorLabel]
+        AddMouseToRRLabel
+    }
+}
+
+# (Re)build the menu each time it's opened, to match the current number of windows
+proc RRExcludeMenu {} {
+    global settings rrExcludeWin
+    set m .rrX.mb.menu
+    $m delete 0 end
+    array unset rrExcludeWin *
+    foreach i $settings(rrExcludeWindows) {
+        set rrExcludeWin($i) 1
+    }
+    for {set i 1} {$i<=$settings(numWindows)} {incr i} {
+        if {![info exists rrExcludeWin($i)]} {
+            set rrExcludeWin($i) 0
+        }
+        $m add checkbutton -label "OMB $i" -variable rrExcludeWin($i) -command RRExcludeMenuChange
+    }
+}
+
+proc RRExcludeMenuChange {} {
+    global settings rrExcludeWin
+    set had [llength $settings(rrExcludeWindows)]
+    set l {}
+    foreach i [lsort -integer [array names rrExcludeWin]] {
+        if {$rrExcludeWin($i)} {
+            lappend l $i
+        }
+    }
+    set settings(rrExcludeWindows) $l
+    if {!$had != ![llength $l]} {
+        # first window(s) selected (or all removed): turn it on and (un)register its hotkey
+        set settings(rrExcludeWindowsOn) 1
+        RegisterAllHotkeys
+    }
+    RRExcludeUpdate
+    SaveSettings
 }
 
 # --- end of Broadcasting ---
@@ -4196,6 +4308,9 @@ array set settings {
     autoResetFocusToMain 1
     autoResetDirect 0
     hk,rrToggle "Ctrl-Shift-R"
+    hk,rrExcludeToggle "Ctrl-Shift-E"
+    rrExcludeWindows {}
+    rrExcludeWindowsOn 1
     hk,focusMain "Ctrl-Shift-W"
     hk,resetAll "Ctrl-Shift-Alt-R"
     rrIndicator,x 0.5
