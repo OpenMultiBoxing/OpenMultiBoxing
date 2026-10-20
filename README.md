@@ -15,6 +15,7 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
 ## Main features
 
 - Window Layout wizard and manual tweaking; get your game windows exactly how you want them to be to play.
+   - Save different layouts as profiles (File > New Profile...) and cycle through them with the Ctrl-Shift-L (next) and Ctrl-Shift-Alt-L (previous) hotkeys. Pick which profiles are in the rotation in the Profile menu (all but Default by default).
 - Instant swapping of windows; with keyboard hotkeys for fast switching to the next or any specific window.
 - Left and right mouse click broadcasting option (press W or both buttons or hold them for more than half a second (delay configurable in settings) to avoid broadcasting)
    - For applications that do not support mouse events through PostMessage, uncheck "Mouse broadcast: message mode" in the Options menu.
