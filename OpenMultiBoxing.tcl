@@ -447,6 +447,86 @@ proc NewProfile {} {
     }
 }
 
+# Adds and selects a new game window title (or * pattern)
+proc AddGame {title} {
+    global settings
+    if {[lsearch -exact $settings(games) $title]==-1} {
+        Debug "New game $title"
+        # game entries come first in the menu, before the separator
+        .mbar.game insert [llength $settings(games)] radiobutton -label $title -value $title -variable settings(game)
+        lappend settings(games) $title
+        set settings(game) $title
+    }
+}
+
+proc UpdateGameMatches {args} {
+    global gameTitle gameMatches
+    if {$gameTitle==""} {
+        set gameMatches ""
+        return
+    }
+    set titles {}
+    foreach w [GameFindWindows $gameTitle] {
+        if {[IsOurs $w] || [catch {twapi::get_window_text $w} t]} {
+            continue
+        }
+        lappend titles $t
+    }
+    set n [llength $titles]
+    if {$n==0} {
+        set gameMatches "No window currently matches"
+        return
+    }
+    set gameMatches "Currently matches $n window(s):"
+    foreach t [lrange $titles 0 2] {
+        append gameMatches "\n    $t"
+    }
+    if {$n>3} {
+        append gameMatches "\n    ..."
+    }
+}
+
+proc AddGameDialog {} {
+    global settings gameTitle gameMatches
+    set t .addGame
+    set gameTitle $settings(game)
+    EnableDisableWindows 0
+    toplevel $t
+    wm resizable $t 0 0
+    wm title $t "OMB Add Game Window Title..."
+    ttk::label  $t.l -text "Game window title to find and capture:"
+    ttk::entry  $t.e -textvar gameTitle -width 50
+    ttk::label  $t.h -text "Exact title, use * to match any text\ne.g. \"Game version:*\" matches \"Game version:1.2.3\" and \"Game version:1.2.4\""
+    ttk::label  $t.m -textvar gameMatches -justify left
+    bind $t.e <Return> {set doneDialog 1}
+    ttk::button $t.ok -text OK -command {set doneDialog 1}
+    ttk::button $t.cancel -text Cancel -command "set gameTitle {}; set doneDialog 1"
+    bind $t.e <Escape> "$t.cancel invoke"
+    grid $t.l - -sticky nws -padx 4 -pady 4
+    grid $t.e - -sticky news -padx 4 -pady 4
+    grid $t.h - -sticky nws -padx 4 -pady 4
+    grid $t.m - -sticky nws -padx 4 -pady 4
+    grid $t.ok $t.cancel -padx 4 -pady 4
+    UpdateGameMatches
+    trace add variable gameTitle write UpdateGameMatches
+    focus $t.e
+    $t.e selection range 0 end
+    UpdateHandles
+    vwait doneDialog
+    trace remove variable gameTitle write UpdateGameMatches
+    destroy $t
+    EnableDisableWindows 1
+    set title [string trim $gameTitle]
+    if {$title!=""} {
+        Debug "Add game dialog returned $title"
+        AddGame $title
+        set settings(game) $title
+        SaveSettings
+    } else {
+        Debug "Add game cancelled"
+    }
+}
+
 proc ProfileFileName {profile} {
     global app_dir SETTINGS_PREFIX SETTINGS_SUFFIX
     set p $profile
@@ -1008,6 +1088,7 @@ proc MenuSetup {} {
         $mG add radiobutton -label $g -value $g -variable settings(game)
     }
     $mG add separator
+    $mG add command -label "Add game window title..." -command AddGameDialog
     $mG add checkbutton -label "Add (capture focused window mode)" -variable settings(captureForegroundWindow) -command UpdateForegroundMode
 
     set m2 .mbar.profile
@@ -1532,13 +1613,20 @@ proc ContextMenu {n x y} {
 }
 
 proc Forget {n} {
-    global slot2handle slot2position settings savedWindowStyle
+    global slot2handle slot2position settings savedWindowStyle origTitle
     if {![info exists slot2handle($n)]} {
         Debug "Nothing to forget for $n"
         return
     }
     set wh $slot2handle($n)
-    catch {Rename $wh $settings(game)}
+    if {[info exists origTitle($wh)]} {
+        set title $origTitle($wh)
+        unset origTitle($wh)
+    } else {
+        # captured before an OMB restart: original title unknown
+        set title [string map {* ""} $settings(game)]
+    }
+    catch {Rename $wh $title}
     unset slot2handle($n)
     UpdateHandles
     .b2 configure -text " Capture "
@@ -1582,13 +1670,26 @@ proc GetY {} {
 
 # --- Windows API: https://twapi.magicsplat.com/v4.4/ui.html
 
+# Exact title match unless the pattern contains *, which then matches any text
+# (only * is special, other glob characters are escaped)
+proc GameFindWindows {pattern} {
+    if {[string first "*" $pattern]==-1} {
+        return [twapi::find_windows -match string -text $pattern -visible true]
+    }
+    set glob [string map {\\ \\\\ ? \\? [ \\[ ] \\]} $pattern]
+    return [twapi::find_windows -match glob -text $glob -visible true]
+}
+
 proc FindGameWindow {} {
     global settings
-    # consider doing exact match with ^ $ or...
-    set wList [twapi::find_windows -match string -text "$settings(game)" -visible true]
+    set wList [GameFindWindows $settings(game)]
     set minTime 0
     set minW ""
     foreach w $wList {
+        # a wide pattern could match our own UI or already captured windows
+        if {[IsOurs $w]} {
+            continue
+        }
         if {[catch {twapi::get_window_process $w} pid]} {
             Debug "Api error for get_window_process $w: $pid"
             continue
@@ -2162,12 +2263,21 @@ proc IsOurs {w} {
 
 set autoCaptureErrorCount 0
 
+# window handle to title before capture, restored by Forget
+array set origTitle {}
+
+proc SaveOrigTitle {w} {
+    global origTitle
+    catch {set origTitle($w) [twapi::get_window_text $w]}
+}
+
 proc AutoCapture {w} {
     global nextWindow settings stayOnTop lastUpdate slot2handle autoCaptureErrorCount
     for {} {[info exists slot2handle($nextWindow)]} {incr nextWindow} {
         Debug "Skipping existing nextwindow $nextWindow"
     }
     set wname "OMB $nextWindow"
+    SaveOrigTitle $w
     if {[catch {
         if {$settings(borderless)} {
             BorderLess $w 0
@@ -2206,12 +2316,7 @@ proc Capture {} {
         }
         set wtitle [twapi::get_window_text $w]
         Debug "Capturing \"$wtitle\""
-        if {[lsearch -exact $settings(games) $wtitle]==-1} {
-            Debug "New game $wtitle"
-            lappend settings(games) $wtitle
-            .mbar.game insert [expr {[.mbar.game index end]-1}] checkbutton -label $wtitle -variable settings(game)
-            set settings(game) $wtitle
-        }
+        AddGame $wtitle
     } else {
         set w [FindGameWindow]
         if {$w eq ""} {
@@ -2220,6 +2325,7 @@ proc Capture {} {
         }
     }
     set wname "OMB $nextWindow"
+    SaveOrigTitle $w
     # We are resizing just after so no need to do it twice,
     # but otherwise it is needed for the inner size of wow to be correct
     if {$settings(borderless)} {
