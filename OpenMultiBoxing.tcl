@@ -276,31 +276,83 @@ proc Connect {} {
 }
 
 proc ConnectTo {destination} {
-    global master settings
+    global master masterHost settings
     if {[info exists master]} {
         Debug "Closing master socket $master"
         close $master
         unset master
     }
+    set masterHost $destination
     if {[catch {set master [socket $destination $settings(listenPort)]} err]} {
+        UpdateNetStatus
         OmbError "Connect error" "Couldn't connect to $destination:\n$err"
         return
     }
     fconfigure $master -blocking 0 -translation binary -encoding binary
     fileevent $master readable [list Master $master]
     Debug "Connected to $destination $master"
+    UpdateNetStatus
+}
+
+# Network status line in the main window: pause checkbox when connected to a main OMB,
+# otherwise a label (both in the same cell so the window height doesn't change)
+proc UpdateNetStatus {} {
+    global master masterHost socket clients settings
+    if {![winfo exists .net]} {
+        return
+    }
+    set remotes ""
+    if {[info exists socket]} {
+        set n 0
+        if {[info exists clients]} {
+            set n [llength $clients]
+        }
+        set remotes "Listening on $settings(listenPort): $n remote[expr {$n==1 ? "" : "s"}]"
+    }
+    if {[info exists master]} {
+        set txt "Pause input from $masterHost"
+        if {$remotes!=""} {
+            append txt " ($remotes)"
+        }
+        .net.cb configure -text $txt
+        grid remove .net.l
+        grid .net.cb
+        return
+    }
+    if {$remotes!=""} {
+        set txt $remotes
+    } elseif {[info exists masterHost]} {
+        set txt "Not connected to $masterHost"
+    } else {
+        set txt "No remote connection"
+    }
+    .net.l configure -text $txt
+    grid remove .net.cb
+    grid .net.l
 }
 
 set networkPause 0
 
+# {x1 y1 x2 y2} of the primary monitor (first one if none is flagged primary)
+proc PrimaryMonitorExtent {} {
+    set monitors [twapi::get_multiple_display_monitor_info]
+    foreach monitor $monitors {
+        if {[dict get $monitor -primary]} {
+            return [dict get $monitor -extent]
+        }
+    }
+    return [dict get [lindex $monitors 0] -extent]
+}
+
 proc Master {s} {
-    global master slot2handle settings networkPause monitorInfo
+    global master slot2handle settings networkPause
     set l [gets $s data]
     if {$l <= 0} {
         if {[eof $s]} {
             Debug "Master socket $s closed"
             close $s
             unset master
+            UpdateNetStatus
             OmbError "No connection" "Lost/Rejected connection to master OMB"
         }
         Debug "Master empty read"
@@ -311,30 +363,38 @@ proc Master {s} {
         return
     }
     lassign $data cmd code
-    set numWindows $settings(numWindows)
+    # No captured window: full screen mode (global input), otherwise input goes to the windows
+    set fullScreen [expr {[array size slot2handle]==0}]
     switch $cmd {
         "MOUSE" {
             set x $code
             set y [lindex $data 2]
+            # empty button == move only
             set button [lindex $data 3]
             Debug "Master socket $s clicked $x $y $button"
-            set skip [RRExcludedWindows]
-            for {set i 1} {$i<=$numWindows} {incr i} {
-                if {[info exists slot2handle($i)] && [lsearch -exact $skip $i] < 0} {
+            if {!$fullScreen} {
+                set skip [RRExcludedWindows]
+                set targets {}
+                for {set i 1} {$i<=$settings(numWindows)} {incr i} {
+                    if {[info exists slot2handle($i)] && [lsearch -exact $skip $i] < 0} {
+                        lappend targets $i
+                    }
+                }
+                # the mouse can only be in one place: moves only apply with a single target window
+                if {$button=="" && [llength $targets]!=1} {
+                    return
+                }
+                foreach i $targets {
                     CheckWindow [list ClickWindowRel $i $x $y $button] $i
                 }
-            }
-            if {$numWindows<=0 || $button==""} {
-                # scale
-                set p [lindex [lindex $monitorInfo(mlist) 0] 0]
-                Debug "Using monitor $p"
-                set lx $monitorInfo($p,x1)
-                set ly $monitorInfo($p,y1)
-                set lw $monitorInfo($p,width)
-                set lh $monitorInfo($p,height)
+            } else {
+                # scale to the primary monitor (monitorInfo is only set once Window Layout was opened)
+                lassign [PrimaryMonitorExtent] lx ly x2 y2
+                set lw [expr {$x2-$lx}]
+                set lh [expr {$y2-$ly}]
                 set xx [expr {round($lx+$x*$lw)}]
                 set yy [expr {round($ly+$y*$lh)}]
-                Debug "Will click '$button' at $xx $yy on monitor $p (${lw}x${lh}@$lx,$ly)"
+                Debug "Will click '$button' at $xx $yy on primary monitor (${lw}x${lh}@$lx,$ly)"
                 twapi::move_mouse $xx $yy
                 if {$button!=""} {
                     twapi::click_mouse_button $button
@@ -342,14 +402,14 @@ proc Master {s} {
             }
         }
         "UP" {
-            if {$numWindows<=1} {
+            if {$fullScreen} {
                 twapi::send_input [list [list "keyup" $code 0]]
             } else {
                 BroadcastKeyToOther -1 $code 1
             }
         }
         "DOWN" {
-            if {$numWindows<=1} {
+            if {$fullScreen} {
                 twapi::send_input [list [list "keydown" $code 0]]
             } else {
                 BroadcastKeyToOther -1 $code 0
@@ -359,6 +419,7 @@ proc Master {s} {
             Debug "Master socket $s unknown command $cmd"
             close $master
             unset master
+            UpdateNetStatus
             OmbError "Unknown command" "Master socket $s unknown command $data"
         }
     }
@@ -371,8 +432,20 @@ proc SendToClients {data} {
             set peer [fconfigure $client -peername]
             close $client
             set clients [lsearch -exact -not -inline $clients $client]
+            UpdateNetStatus
             OmbError "Error sending to client" "Error sending to client $peer\n$err\n\n[llength $clients] client(s) remaining."
         }
+    }
+}
+
+# Remotes don't send anything: readable means they disconnected
+proc ClientEvent {client} {
+    global clients
+    if {[catch {read $client}] || [eof $client]} {
+        Debug "Client socket $client closed"
+        close $client
+        set clients [lsearch -exact -not -inline $clients $client]
+        UpdateNetStatus
     }
 }
 
@@ -397,10 +470,20 @@ proc NetworkSetup {} {
             close $client
         }
         set clients {}
+        UpdateNetStatus
         return
     }
+    # (re)attach after a code update, clients accepted by an older version had no handler
+    foreach client $clients {
+        fileevent $client readable [list ClientEvent $client]
+    }
     set port $settings(listenPort)
-    set socket [socket -server NewConnection $port]
+    if {[catch {set socket [socket -server NewConnection $port]} err]} {
+        UpdateNetStatus
+        OmbError "Listen error" "Couldn't listen on port $port:\n$err"
+        return
+    }
+    UpdateNetStatus
 }
 
 proc NewConnection {channel clientaddr clientport} {
@@ -412,8 +495,10 @@ proc NewConnection {channel clientaddr clientport} {
         return
     }
     fconfigure $channel -blocking 0 -translation binary -encoding binary
+    fileevent $channel readable [list ClientEvent $channel]
     lappend clients $channel
     Debug "Added connection $channel from $clientaddr ($clientport) to clients list: $clients"
+    UpdateNetStatus
 }
 
 proc NewProfile {} {
@@ -1007,8 +1092,17 @@ proc UISetup {} {
     grid [ttk::checkbutton .mbc -text "Broadcast mouse clicks" -variable mouseBroadcast] -padx 4 -columnspan 2 -sticky w
     tooltip .mbc "Toggle mouse click broadcasting\nHotkey: $settings(hk,mouseBroadcast)"
     grid [frame .sep3 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
-    grid [ttk::checkbutton .pauseNet -text "Pause remote input broadcasting" -variable networkPause] -padx 4 -columnspan 2 -sticky ew
-    tooltip .pauseNet "When checked, network commands coming from \"$settings(connectTo)\" are ignored\nOnly applicable if using File>Connect to..."
+    frame .net
+    # initial texts so the heights below are measured with text
+    ttk::checkbutton .net.cb -text "Pause input" -variable networkPause
+    tooltip .net.cb "When checked, network commands coming from the main OMB are ignored"
+    ttk::label .net.l -text "No remote connection"
+    tooltip .net.l "Network status\nUse File>Connect to... on remote OMBs\nand Options>Listen for other OMB connections on the main one"
+    grid .net.cb -row 0 -column 0 -sticky w
+    grid .net.l -row 0 -column 0 -sticky w
+    grid rowconfigure .net 0 -minsize [expr {max([winfo reqheight .net.cb], [winfo reqheight .net.l])}]
+    grid .net -padx 4 -columnspan 2 -sticky ew
+    UpdateNetStatus
     grid [ttk::label .l_bottom -textvariable bottomText -justify center -anchor c] -padx 2 -columnspan 2
     bind .l_bottom <ButtonPress> [list CheckForUpdates 0]
     tooltip .l_bottom "Click to check for update from $vers"
@@ -1371,6 +1465,10 @@ proc ClickWindowRel {n xp yp button} {
     set y [expr {$ly+$y}]
     Debug "Will click at $x $y for $n"
     twapi::move_mouse $x $y
+    if {$button==""} {
+        # move only (remote mouse tracking)
+        return
+    }
     set w $slot2handle($n)
     after $settings(mouseBroadcastDelay)
     if {$settings(mouseBroadcastUsePostMessage)} {

@@ -25,7 +25,8 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
    - Some applications/games do not accept PostMessage as a way to get input keys and you need to use OMB 5.2.7 with RoundRobin instead.
 - **Key remap** you can change which key code is sent to the other windows.
 - **Multi-PC** broadcasting: Select "Listen for other OMB connections" in the options menu on the main computer. Select "Connect to..." in the File menu on the other computers, type the main computer's name. On the main computer, accept the connection request from the other computers (default port is 4464, can be changed in settings).
-   - A special case on remote PCs is if you set number of windows to 1 or 0, keyboard events are sent to the system instead of a message queue for each window. Likewise if set to 0 windows, mouse events are scaled to the smallest monitor instead of the non existent window (equivalent of full screen capture of window 1 and non message mode setting).
+   - The main window shows the network status: number of connected remote PCs on the main one, "Pause input from ..." checkbox on the remotes.
+   - On a remote PC with no captured window, keys go to the system and the mouse is scaled to the primary monitor (full screen). With one window, keys, clicks and mouse movement go to that window. With several, keys and clicks are repeated in each window (mouse movement is ignored).
    - You also have the Option to send mouse movements also to remote PCs.
 - Secure text (password) broadcasting option (can also broadcast slash commands, etc)
 - Many additional options to switch which window your keys are going to:
