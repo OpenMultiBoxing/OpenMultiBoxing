@@ -629,6 +629,10 @@ proc AfterSettings {} {
         }
         unset settings(overlayBig)
     }
+    # Removed custom rotation / direct focus keys settings
+    foreach k {autoResetDirect rrKeyListCustom rrKeyListDirect rrCustomExcludeList} {
+        unset -nocomplain settings($k)
+    }
     RegisterAllHotkeys
     # Set mouse control to current values
     global mouseFollow mouseRaise mouseDelay
@@ -637,7 +641,6 @@ proc AfterSettings {} {
     set mouseRaise [GetMouseRaise]
     LoadLayout
     Overlay
-    RRCustomMenu
     RRExcludeUpdate
     Debug "Settings (re)Loaded."
 }
@@ -654,7 +657,7 @@ proc RegisterAllHotkeys {} {
     RegisterHotkey "Focus follow mouse toggle" hk,focusFollowMouse FocusFollowMouseToggle
     RegisterHotkey "Always on top toggle" hk,stayOnTopToggle StayOnTopToggle
     RegisterHotkey "Overlay toggle" hk,overlayToggle OverlayToggle
-    RegisterHotkey "RoundRobin toggle" hk,rrToggle RRToggle
+    RegisterHotkey "Broadcast toggle" hk,rrToggle RRToggle
     RegisterHotkey "Focus main window" hk,focusMain FocusMain
     RegisterHotkey "Reset all windows to saved positions" hk,resetAll ResetAll
     RegisterHotkey "Start/Stop mouse broadcasting" hk,mouseBroadcast MouseBroadcast
@@ -763,9 +766,9 @@ proc UISetup {} {
     set err [GetLogo]
     if {$err != ""} {
         set txt "Opensource\nMulti\nBoxing"
-        grid [ttk::label .logo -text $txt] -rowspan 3
+        grid [ttk::label .logo -text $txt] -row 0 -column 0 -rowspan 3
     } else {
-        grid [ttk::label .logo] -rowspan 3 -pady 6 -padx 12
+        grid [ttk::label .logo] -row 0 -column 0 -rowspan 3 -pady 6 -padx 12
         .logo configure -image $imgOMB70
         wm iconphoto . -default $imgOMB70
     }
@@ -832,24 +835,6 @@ proc UISetup {} {
         pack .rrX.mb -side left -fill x -expand 1 -padx {4 0}
         grid .rrX -padx 4 -columnspan 2 -sticky ew
         RRExcludeUpdate
-
-        # (old wob) RR stuff that's not working in broadcast OMB
-
-        # set rrC .rrC
-        # frame $rrC
-        # ttk::menubutton $rrC.rrMenuB -text "Skips" -menu $rrC.rrMenuB.menu
-        # menu $rrC.rrMenuB.menu -tearoff 0
-        # RRCustomMenu
-        # tooltip $rrC.rrMenuB "Select which window(s) are excluded from custom rotation"
-        # pack [ttk::label $rrC.lrrK3 -text "Custom rotation keys:" -anchor w] $rrC.rrMenuB -anchor w -side left -expand 1
-        # grid $rrC -padx 4 -columnspan 2 -sticky ew
-        # grid [entry .eRR3 -textvariable settings(rrKeyListCustom) -width $width] -columnspan 2 -padx 4 -sticky ew
-        # tooltip .eRR3 "Which keys trigger custom rotation $rrlabel\nHit <Return> after change to take effect.\nSee help/FAQ for list."
-        # bind .eRR3 <Return> RRKeysListChange
-        # grid [ttk::label .lrrD -text "Direct focus keys (Main, WOB1...N):"] -padx 4 -columnspan 2 -sticky w
-        # grid [entry .eRR4 -textvariable settings(rrKeyListDirect) -width $width] -columnspan 2 -padx 4 -sticky ew
-        # tooltip .eRR4 "Which key will switch focus asap directly to Main, WOB1, WOB2,...\nFirst key will focus main, 2nd key will focus WOB1, 3rd key will focus WOB2,...\nTo skip a slot position use .*\nRemember this is in addition to the focus hotkeys.\nHit <Return> after change to take effect.\nSee help/FAQ for list."
-        # bind .eRR4 <Return> RRKeysListChange
     }
 
     grid [frame .sep2 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
@@ -1050,8 +1035,7 @@ proc MenuSetup {} {
     $m3 add radiobutton -label "Auto reset focus to main: after 1 sec" -value 1 -variable settings(autoResetFocusToMain)
     $m3 add radiobutton -label "Auto reset focus to main: after 2 sec" -value 2 -variable settings(autoResetFocusToMain)
     $m3 add radiobutton -label "Auto reset focus to main: after 3 sec" -value 3 -variable settings(autoResetFocusToMain)
-    $m3 add checkbutton -label "Auto reset after direct BR keys" -variable settings(autoResetDirect)
-    $m3 add checkbutton -label "Always focus (if mixing click and RR)" -variable settings(rrAlwaysFocus)
+    $m3 add checkbutton -label "Always focus (if mixing clicks and focus hotkeys)" -variable settings(rrAlwaysFocus)
     $m3 add checkbutton -label "Key broadcast: send modifiers only with a key" -variable settings(rrDeferModifiers)
     $m3 add separator
     $m3 add checkbutton -label "Mouse broadcast: message mode" -variable settings(mouseBroadcastUsePostMessage)
@@ -1938,45 +1922,8 @@ proc SwapPreviousWindow {} {
     SetAsMain $n
 }
 
-proc NextCustomWindow {} {
-    global customWindow maxNumW rrCustom slot2position
-    if {![info exists rrCustom(0)]} {
-        # updgrade without menu setup
-        OmbError "Restart needed" "You just upgraded but need to restart OMB! No state will be lost if you do! Thanks!"
-    }
-    set mainSlot $slot2position(1)
-    set mainCheck $mainSlot
-    if {!$rrCustom(0)} {
-        set mainCheck 0
-    }
-    set n $customWindow
-    # Avoid infinite loop trying to find impossible next custom window
-    set excl 0
-    for {set i 1} {$i<$maxNumW} {incr i} {
-        set n [expr {$n % ($maxNumW-1) + 1}]
-        incr excl $rrCustom($n)
-        # check for main
-        if {$n==$mainCheck} {
-            continue
-        }
-        # Ok to use if Main isn't skipped and this is Main currently
-        if {!$rrCustom($n) || (!$mainCheck && $mainSlot==$n)} {
-            Debug "Next custom window is $n because $rrCustom($n) $mainCheck $mainSlot"
-            set customWindow $n
-            return $n
-        }
-    }
-    # only complain if it would never work; not if say main is excluded; only Omb2 is allowed yet
-    # wob2 is the one in main
-    Debug "Nothing found $excl $maxNumW staying on $customWindow"
-    if {$excl==$maxNumW-1} {
-        OmbError "Custom Broadcasting Error" "Invalid Custom Rotation, All windows are disabled!"
-    }
-    return $customWindow
-}
-
-proc FocusNextWindow {{custom 0}} {
-    global focusWindow customWindow maxNumW settings resetTaskId lastFocusWindow
+proc FocusNextWindow {} {
+    global focusWindow maxNumW settings resetTaskId lastFocusWindow
     if {[info exists resetTaskId]} {
         after cancel $resetTaskId
         unset resetTaskId
@@ -1984,21 +1931,14 @@ proc FocusNextWindow {{custom 0}} {
     if {$maxNumW<3} {
         return
     }
-    if {$custom} {
-        set n [NextCustomWindow]
-    } else {
-        # maxNumW is one more than number of windows
-        set n [expr {$focusWindow % ($maxNumW-1) + 1}]
-    }
-    Debug "FocusNextWindow: custom $custom, focusWindow $focusWindow maxNumW $maxNumW -> $n"
+    # maxNumW is one more than number of windows
+    set n [expr {$focusWindow % ($maxNumW-1) + 1}]
+    Debug "FocusNextWindow: focusWindow $focusWindow maxNumW $maxNumW -> $n"
     if {$settings(rrAlwaysFocus) || $n!=$lastFocusWindow} {
-        # Don't update here as it could be custom
         CheckWindow [list FocusN $n true 0] $n
     }
-    if {!$custom} {
-        # always update even if we were already on the spot (so we move out of it next)
-        set focusWindow $n
-    }
+    # always update even if we were already on the spot (so we move out of it next)
+    set focusWindow $n
     if {$settings(autoResetFocusToMain)>0} {
         set resetTaskId [after [expr {round(1000.*$settings(autoResetFocusToMain))}] FocusMain]
     }
@@ -2370,7 +2310,6 @@ proc updateListBox {n w wname} {
         set settings(numWindows) $n
         Overlay
     }
-    RRCustomMenu
     set nextWindow [expr {$n+1}]
     set maxNumW $nextWindow
 }
@@ -2919,17 +2858,11 @@ proc RRToggle {} {
 
 # Read/reset all keys so we don't pile up keydown when Broadcasting is off
 proc RRreadAllKeys {} {
-    global rrCodes rrExcludes rrCodesCustom rrCodesDirect
+    global rrCodes rrExcludes
     foreach code $rrExcludes {
         twapi::GetAsyncKeyState $code
     }
     foreach code $rrCodes {
-        twapi::GetAsyncKeyState $code
-    }
-    foreach code $rrCodesCustom {
-        twapi::GetAsyncKeyState $code
-    }
-    foreach code $rrCodesDirect {
         twapi::GetAsyncKeyState $code
     }
 }
@@ -2977,7 +2910,7 @@ proc RRUpdate {} {
     Debug "Reset all Broadcasting key states"
 }
 
-proc KeyToKeyCode {k {noneKeyPattern ""}} {
+proc KeyToKeyCode {k} {
     set len [string length $k]
     if {$len == 0} {
         # skip extra spaces
@@ -2985,26 +2918,21 @@ proc KeyToKeyCode {k {noneKeyPattern ""}} {
     }
     if {$len == 1} {
         lassign [twapi::VkKeyScan $k] x code
+    } elseif {![info exists twapi::vk_map($k)]} {
+        OmbError "Invalid Broadcasting key" "$k isn't a valid key"
+        return
     } else {
-        if {$noneKeyPattern!="" && [string match $noneKeyPattern $k]} {
-            # only for direct we need to skip some positions
-            set code 0
-        } elseif {![info exists twapi::vk_map($k)]} {
-            OmbError "Invalid Broadcasting key" "$k isn't a valid key"
-            return
-        } else {
-            set code [expr [lindex $twapi::vk_map($k) 0]]
-        }
+        set code [expr [lindex $twapi::vk_map($k) 0]]
     }
     Debug "RRkey $k -> 0x[format %x $code]"
     return [list $k $code]
 }
 
-proc RRkeyListToCodes {keyList {noneKeyPattern ""}} {
+proc RRkeyListToCodes {keyList} {
     set res {}
     set fixedList {}
     foreach k [split $keyList " "] {
-        lassign [KeyToKeyCode $k $noneKeyPattern] k code
+        lassign [KeyToKeyCode $k] k code
         set len [string length $k]
         if {$len == 0} {
             # skip extra spaces and errors
@@ -3018,9 +2946,6 @@ proc RRkeyListToCodes {keyList {noneKeyPattern ""}} {
 
 set rrCodes {}
 set rrExcludes {}
-set rrExcludes {}
-set rrCodesCustom {}
-set rrCodesDirect {}
 array set broadcastMap {}
 # sentDown(slot,keyCode) exists when we posted key down to that slot without the up yet
 array set sentDown {}
@@ -3033,7 +2958,7 @@ set rrLastFocus 0
 
 proc RRKeysListChange {} {
     twapi::_init_vk_map
-    global settings rrCodes rrExcludes rrCodesCustom rrCodesDirect broadcastMap
+    global settings rrCodes rrExcludes broadcastMap
     # Split settings(broadcastMap) into pairs separated by :
     catch {unset broadcastMap}
     array set broadcastMap {}
@@ -3059,14 +2984,11 @@ proc RRKeysListChange {} {
     # TODO: check for duplicates
     set settings(broadcastMap) [join $okMapList " "]
     lassign [RRkeyListToCodes $settings(rrKeyListExclude)] rrCodes settings(rrKeyListExclude)
-    #lassign [RRkeyListToCodes $settings(rrKeyListCustom)] rrCodesCustom settings(rrKeyListCustom)
-    #lassign [RRkeyListToCodes $settings(rrKeyListDirect) ".*"] rrCodesDirect settings(rrKeyListDirect)
     lassign [RRkeyListToCodes $settings(rrModExcludeList)] rrExcludes settings(rrModExcludeList)
     ResetIgnoredKeys $rrCodes
 }
 
 set rrLastCode {}
-set rrLastCustom 0
 
 proc ResetIgnoredKeys {codes} {
     global ignoredKeyCode
@@ -3134,7 +3056,7 @@ proc FocusIn {} {
 
 # Main broadcast setup
 proc RRCheck {} {
-    global rrCodes rrCodesCustom rrCodesDirect rrExcludes rrLastCode rrLastCustom rrTaskId settings maxNumW slot2position
+    global rrCodes rrExcludes rrLastCode rrTaskId settings maxNumW slot2position
     global rrPendingMods rrSentDown hotkeyCombo rrLastFocus broadcastMap
     set rrTaskId [after $settings(rrInterval) RRCheck]
     #Debug "RR Check..."
@@ -3276,88 +3198,6 @@ proc HeldModifiersMask {} {
         }
     }
     return $mask
-}
-
-    # direct on key down
-    # set i 0
-    # foreach code $rrCodesDirect {
-    #     # Allow "NONE"
-    #     if {$code != 0} {
-    #         set state [twapi::GetAsyncKeyState $code]
-    #         if {$state != 0} {
-    #             FocusDirect [expr {$i%($settings(numWindows)+1)}]
-    #             break
-    #         }
-    #     }
-    #     incr i
-    # }
-    # # custom rotation, keyUp normal mode
-    # foreach code $rrCodesCustom {
-    #     set state [twapi::GetAsyncKeyState $code]
-    #     if {$state != 0} {
-    #         set rrLastCode $code
-    #         set rrLastCustom 1
-    #         return
-    #     }
-    # }
-
-
-proc FocusDirect {n} {
-    global lastFocusWindow slot2position resetTaskId settings
-    # Like in FocusNextWindow - cancel auto reset
-    if {[info exists resetTaskId]} {
-        after cancel $resetTaskId
-        unset resetTaskId
-    }
-    # Like FocusMain
-    if {$n==0} {
-        if {![info exists slot2position(1)]} {
-            return
-        }
-        set n $slot2position(1)
-    }
-    if {$settings(rrAlwaysFocus) || $n!=$lastFocusWindow} {
-        CheckWindow [list FocusN $n true 0] $n
-    }
-    if {$settings(autoResetFocusToMain)>0 && $settings(autoResetDirect)} {
-        set resetTaskId [after [expr {round(1000.*$settings(autoResetFocusToMain))}] FocusMain]
-    }
-}
-
-proc RRCustomToArray {} {
-    global settings rrCustom
-    catch {unset rrCustom}
-    array set rrCustom {}
-    #foreach w $settings(rrCustomExcludeList) {
-    #    set rrCustom($w) 1
-    #}
-}
-
-proc RRCustomUpdateSettings {} {
-    global settings rrCustom
-    set settings(rrCustomExcludeList) {}
-    foreach {k v} [array get rrCustom] {
-        if {$v} {
-            lappend settings(rrCustomExcludeList) $k
-        }
-    }
-}
-
-proc RRCustomMenu {} {
-    global settings rrCustom hasRR hasBR
-    if {!$hasRR&&!$hasBR} {
-        return
-    }
-    RRCustomToArray
-    set m .rrC.rrMenuB.menu
-    if {![winfo exists $m]} {
-        return
-    }
-    $m delete 0 99
-    $m add checkbutton -label "Main" -variable rrCustom(0) -command RRCustomUpdateSettings
-    for {set i 1} {$i<=$settings(numWindows)} {incr i} {
-        $m add checkbutton -label "OMB $i" -variable rrCustom($i) -command RRCustomUpdateSettings
-    }
 }
 
 # --- Skip windows: windows (OMB numbers, so it follows them when swapped) that don't get broadcast keys/clicks
@@ -3754,7 +3594,6 @@ proc ChangeLayout {args} {
     set layoutOneSize $settings(layoutOneSize)
     set n [expr round($settings(numWindows))]
     set settings(numWindows) $n
-    RRCustomMenu
     UpdateLayoutNumWindows
     set c .layout.c
     if {![winfo exists $c]} {
@@ -4306,7 +4145,6 @@ array set settings {
     rrInterval 5
     rrAlwaysFocus 1
     autoResetFocusToMain 1
-    autoResetDirect 0
     hk,rrToggle "Ctrl-Shift-R"
     hk,rrExcludeToggle "Ctrl-Shift-E"
     rrExcludeWindows {}
@@ -4336,10 +4174,6 @@ array set settings {
     listenPort 4464
     listen 0
 }
-#   rrKeyListAll ". F B T I \[ \] SPACE 1 2 3 4 5 6 7 8 9 0 - = UP LEFT RIGHT DOWN"
-#   rrKeyListCustom ". [ ] F11"
-#   rrKeyListDirect ".m .1 .2 .3 ..."
-#   rrCustomExcludeList 0
 
 set settings(mouseInsideGameWindowFocuses) [expr {$hasRR||$hasBR}]
 
@@ -4359,8 +4193,6 @@ if {![info exists pos]} {
     set maxNumW 1
     # currently focused windows for normal rotation
     set focusWindow 1
-    # custom rotation focused window
-    set customWindow 1
     # Actual last focused window (at least as far as OMB is concerned)
     set lastFocusWindow 1
     # last swapped window
@@ -4392,13 +4224,33 @@ trace add variable nextWindow write updateIndex
 #Debug "display monitors [twapi::get_display_monitors -activeonly]"
 #Debug "display info [twapi::get_multiple_display_monitor_info]"
 
+set savedWindowList {}
+if {$isUpdate} {
+    # Recreate the menu and main window so new/changed UI elements show up without a restart,
+    # keeping the captured windows list
+    Debug "Rebuilding menu and main window after update"
+    if {[winfo exists .lbw]} {
+        set savedWindowList [.lbw get 0 end]
+    }
+    . configure -menu {}
+    catch {destroy .mbar}
+    foreach w [grid slaves .] {
+        destroy $w
+    }
+}
+
 MenuSetup
 
 # Make it so the code can be reloaded without errors
 if {![winfo exists .logo]} {
-    font create WOBBold {*}[font actual [::ttk::style lookup TButton -font]]
-    font configure WOBBold -weight bold
+    if {[lsearch -exact [font names] WOBBold] < 0} {
+        font create WOBBold {*}[font actual [::ttk::style lookup TButton -font]]
+        font configure WOBBold -weight bold
+    }
     UISetup
+    if {[llength $savedWindowList]} {
+        .lbw insert end {*}$savedWindowList
+    }
     set mouseTrackOn ""
     updateIndex
     # Save settings once
