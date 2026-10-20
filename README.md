@@ -15,11 +15,13 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
 ## Main features
 
 - Window Layout wizard and manual tweaking; get your game windows exactly how you want them to be to play.
-   - Save different layouts as profiles (File > New Profile...) and cycle through them with the Ctrl-Shift-L (next) and Ctrl-Shift-Alt-L (previous) hotkeys. Pick which profiles are in the rotation in the Profile menu (all but Default by default).
+   - Save different layouts as profiles (File > New Profile...) and cycle through them with the Ctrl-Shift-L (next) and Ctrl-Shift-Alt-L (previous) hotkeys. Pick which profiles are in the rotation with Profile > "Profiles in rotation..." (all but Default by default).
+- Any game or app: pick it in the Game menu or add its window title with Game > "Add game window title..." (use `*` to match a changing part, e.g. a version number in the title).
 - Instant swapping of windows; with keyboard hotkeys for fast switching to the next or any specific window.
 - Left and right mouse click broadcasting option (press W or both buttons or hold them for more than half a second (delay configurable in settings) to avoid broadcasting)
    - For applications that do not support mouse events through PostMessage, uncheck "Mouse broadcast: message mode" in the Options menu.
 - **Key broadcasting** when turned on, with exclusions (e.g W A S D for movement from main window)
+   - Skip some windows (e.g. 4 and 5) from key and mouse broadcasting: check "Skip" and pick them in its dropdown, toggle with Ctrl-Shift-E.
    - Some applications/games do not accept PostMessage as a way to get input keys and you need to use OMB 5.2.7 with RoundRobin instead.
 - **Key remap** you can change which key code is sent to the other windows.
 - **Multi-PC** broadcasting: Select "Listen for other OMB connections" in the options menu on the main computer. Select "Connect to..." in the File menu on the other computers, type the main computer's name. On the main computer, accept the connection request from the other computers (default port is 4464, can be changed in settings).
