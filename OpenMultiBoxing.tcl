@@ -1921,7 +1921,18 @@ proc EditSettings {} {
     global settings
     Debug "Edit settings requested, first saving and then opening editor"
     SaveSettings
-    twapi::shell_execute -path notepad.exe -params [ProfileFileName $settings(profile)]
+    set pf [ProfileFileName $settings(profile)]
+    # #36 use the editor registered for the file type if any, else notepad
+    if {[catch {twapi::shell_execute -verb edit -path $pf -noui 1} err]} {
+        Debug "No edit verb for $pf: $err"
+        if {[catch {twapi::shell_execute -path notepad.exe -params $pf} err]} {
+            Debug "Notepad failed for $pf: $err"
+            clipboard clear
+            clipboard append $pf
+            OmbError "OpenMultiBoxing editor error" \
+                "Unable to open an editor ($err) for\n\n$pf\n\nThat path is now in the clipboard: open it with your\ntext editor and then click Reload Settings."
+        }
+    }
     .b1 configure -text "Reload Settings" -command LoadSettings
 }
 
