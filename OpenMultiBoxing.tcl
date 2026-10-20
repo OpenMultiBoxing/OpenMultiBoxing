@@ -676,6 +676,31 @@ proc UpdateProfileRotation {} {
     SaveSettings
 }
 
+# Stays up (unlike a menu) so several profiles can be checked/unchecked
+proc ProfileRotationDialog {} {
+    global settings profileRotated
+    set tw .profileRotation
+    if {![winfo exists $tw]} {
+        toplevel $tw
+        wm title $tw "OMB Profiles in rotation"
+        wm resizable $tw 0 0
+        grid [ttk::label $tw.l -text "Profiles cycled through by\n$settings(hk,nextProfile) (next) and $settings(hk,previousProfile) (previous):"] -padx 8 -pady 4 -sticky w
+        grid [ttk::button $tw.close -text Close -command [list destroy $tw]] -row 2 -padx 8 -pady 6
+        UpdateHandles
+    }
+    # (re)create the checkbuttons, the profiles list may have changed
+    catch {destroy $tw.f}
+    grid [ttk::frame $tw.f] -row 1 -padx 8 -sticky w
+    array unset profileRotated
+    set i 0
+    foreach p $settings(profiles) {
+        set profileRotated($p) [expr {[lsearch -exact $settings(profilesNotRotated) $p] == -1}]
+        grid [ttk::checkbutton $tw.f.cb[incr i] -text $p -variable profileRotated($p) -command UpdateProfileRotation] -sticky w
+    }
+    wm state $tw normal
+    raise $tw
+}
+
 proc LoadSettings {} {
     global SETTINGS_FILE settings app_dir
     if {[winfo exists .b1]} {
@@ -1100,7 +1125,7 @@ proc CloseAllGames {{andExit 0}} {
 }
 
 proc UpdateProfilesMenu {} {
-    global settings profileRotated
+    global settings
     set m2 .mbar.profile
     $m2 delete 0 end
     foreach p $settings(profiles) {
@@ -1109,17 +1134,12 @@ proc UpdateProfilesMenu {} {
     $m2 add separator
     $m2 add command -label "Next profile ($settings(hk,nextProfile))" -command NextProfile
     $m2 add command -label "Previous profile ($settings(hk,previousProfile))" -command PreviousProfile
-    set mR $m2.rotation
-    catch {destroy $mR}
-    menu $mR -tearoff 0
-    $m2 add cascade -label "Profiles in rotation" -menu $mR
-    array unset profileRotated
-    foreach p $settings(profiles) {
-        set profileRotated($p) [expr {[lsearch -exact $settings(profilesNotRotated) $p] == -1}]
-        $mR add checkbutton -label $p -variable profileRotated($p) -command UpdateProfileRotation
-    }
+    $m2 add command -label "Profiles in rotation..." -command ProfileRotationDialog
     $m2 add separator
     $m2 add command -label "Refresh Profiles" -command RefreshProfiles
+    if {[winfo exists .profileRotation]} {
+        ProfileRotationDialog
+    }
 }
 
 proc MenuSetup {} {
