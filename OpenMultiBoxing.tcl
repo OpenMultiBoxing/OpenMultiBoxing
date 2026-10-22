@@ -2700,7 +2700,9 @@ proc WindowLayout {} {
     ttk::radiobutton $tw.asrf.ar3 -value "16/10" -text "16:10" -variable settings(aspectRatio) -command ChangeLayout
     ttk::radiobutton $tw.asrf.ar4 -value "16/9" -text "16:9" -variable settings(aspectRatio) -command ChangeLayout
     ttk::radiobutton $tw.asrf.ar5 -value "21/9" -text "21:9" -variable settings(aspectRatio) -command ChangeLayout
-    pack [ttk::label $tw.asrf.l2 -text "Aspect ratio:" -anchor w -justify left] $tw.asrf.ar0  $tw.asrf.ar1  $tw.asrf.ar2  $tw.asrf.ar3  $tw.asrf.ar4  $tw.asrf.ar5 -side left -expand 1
+    ttk::radiobutton $tw.asrf.ar6 -value "Same" -text "Same" -variable settings(aspectRatio) -command ChangeLayout
+    tooltip $tw.asrf.ar6 "Biggest small windows (as with Any),\nthen their aspect ratio for all windows\n(so swapping windows and mouse clicks match)"
+    pack [ttk::label $tw.asrf.l2 -text "Aspect ratio:" -anchor w -justify left] $tw.asrf.ar0  $tw.asrf.ar1  $tw.asrf.ar2  $tw.asrf.ar3  $tw.asrf.ar4  $tw.asrf.ar5 $tw.asrf.ar6 -side left -expand 1
     grid $tw.asrf -padx 3 -pady 6 -columnspan 6 -sticky we
     grid [canvas $tw.c -relief ridge -bd 2] -columnspan 6 -padx 5
     grid [ttk::label $tw.linfo -textvariable layoutinfo] -columnspan 6
@@ -2765,6 +2767,77 @@ proc AddRemoveExcluded {i} {
     UpdateExcluded
 }
 
+# Testing aid, from the -debug console: pretend to have these monitors for the layout window, e.g.
+#   FakeMonitors 4k 1440p* 4k:p
+# Left to right, each WxH or a name below, * marks the primary (else the first one), :p portrait,
+# :t / :b aligned on the top / bottom of the previous one (default centered).
+# No argument goes back to the real monitors.
+proc FakeMonitors {args} {
+    global fakeMonitors
+    set sizes {720p {1280 720} 1080p {1920 1080} 1200p {1920 1200} 1440p {2560 1440} 1600p {2560 1600}
+        4k {3840 2160} 5k {5120 2880} uw {3440 1440} uw1080 {2560 1080} 5k2k {5120 2160} 32x9 {5120 1440}}
+    unset -nocomplain fakeMonitors
+    if {[llength $args]} {
+        set mons {}
+        set primary 0
+        set i 0
+        foreach spec $args {
+            set flags [lassign [split $spec :] size]
+            if {[regsub {\*$} $size {} size]} {
+                set primary $i
+            }
+            if {[dict exists $sizes $size]} {
+                lassign [dict get $sizes $size] w h
+            } elseif {![regexp {^(\d+)x(\d+)$} $size -> w h]} {
+                error "Unknown monitor '$size': use WxH or one of [dict keys $sizes]"
+            }
+            if {"p" in $flags} {
+                lassign [list $h $w] w h
+            }
+            set x 0
+            set y 0
+            if {$i > 0} {
+                lassign [lindex $mons end] px1 py1 x py2
+                if {"t" in $flags} {
+                    set y $py1
+                } elseif {"b" in $flags} {
+                    set y [expr {$py2-$h}]
+                } else {
+                    set y [expr {$py1+($py2-$py1-$h)/2}]
+                }
+            }
+            lappend mons [list $x $y [expr {$x+$w}] [expr {$y+$h}]]
+            incr i
+        }
+        # primary at 0,0 with a taskbar
+        lassign [lindex $mons $primary] dx dy
+        set fakeMonitors {}
+        set i 0
+        foreach m $mons {
+            lassign $m x1 y1 x2 y2
+            set extent [list [expr {$x1-$dx}] [expr {$y1-$dy}] [expr {$x2-$dx}] [expr {$y2-$dy}]]
+            set workarea $extent
+            if {$i == $primary} {
+                lset workarea 3 [expr {[lindex $extent 3]-48}]
+            }
+            incr i
+            lappend fakeMonitors [list -name "\\\\.\\DISPLAY$i" -extent $extent -workarea $workarea -primary [expr {$i-1 == $primary}]]
+        }
+    }
+    if {![winfo exists .layout]} {
+        WindowLayout
+    }
+    UpdateExcluded
+}
+
+proc MonitorsInfo {} {
+    global fakeMonitors
+    if {[info exists fakeMonitors]} {
+        return $fakeMonitors
+    }
+    twapi::get_multiple_display_monitor_info
+}
+
 proc SetUpMonitors {} {
     global settings monitorInfo scale skipMonitorText ignoreMonitorIdx scaleText
     set tw .layout
@@ -2774,7 +2847,7 @@ proc SetUpMonitors {} {
     }
     destroy $tw.c
     grid [canvas $tw.c -relief ridge -bd 2] -row 3 -columnspan 6 -padx 5
-    set displayInfo [twapi::get_multiple_display_monitor_info]
+    set displayInfo [MonitorsInfo]
     Debug "displayInfo = $displayInfo"
     set n 0
     set i 0
@@ -3909,6 +3982,28 @@ proc ChangeLayout {args} {
     }
     $c delete wowAll
     Debug "*** ChangeLayout $args for $n - onesize $layoutOneSize"
+    AutoLayout $n $layoutOneSize
+    if {$settings(aspectRatio) == "Same" && $n > 0} {
+        # redo the layout with the aspect ratio of the smallest window of the "Any" layout
+        set minArea 0
+        for {set i 1} {$i<=$n} {incr i} {
+            lassign [$c coords "wow$i&&wowWindow"] x1 y1 x2 y2
+            set area [expr {($x2-$x1)*($y2-$y1)}]
+            if {$minArea == 0 || $area < $minArea} {
+                set minArea $area
+                set aspectRatio [expr {1.0*($x2-$x1)/($y2-$y1)}]
+            }
+        }
+        Debug "Same aspect ratio for all: $aspectRatio"
+        $c delete wowAll
+        AutoLayout $n $layoutOneSize
+    }
+    $c scale wowAll 0 0 $scale $scale
+    SetupMove
+}
+
+proc AutoLayout {n layoutOneSize} {
+    global settings monitorInfo aspectRatio
     if {$settings(layoutStacked)} {
         # biggest monitor
         set mIdx [lindex [lindex $monitorInfo(mlist) end] 0]
@@ -3959,8 +4054,6 @@ proc ChangeLayout {args} {
             LayoutMonitors $mlist $monitorInfo(totalArea) 1 $n
         }
     }
-    $c scale wowAll 0 0 $scale $scale
-    SetupMove
 }
 
 proc LayoutMonitors {mlist totalArea startAt n args} {
@@ -4013,15 +4106,32 @@ proc SplitForN {n} {
     }
 }
 
-proc CalcSize {monitor numWindows} {
-    Debug "CalcSize $numWindows on monitor $monitor"
-    global monitorInfo aspectRatio
-    set w $monitorInfo($monitor,width)
-    set h $monitorInfo($monitor,height)
-    lassign [SplitForN $numWindows] xdiv ydiv
+# Window size for a xdiv x ydiv grid on a w x h monitor and how good it is:
+# its area, not counting width past 21:9.
+proc GridWindowSize {w h xdiv ydiv} {
+    global aspectRatio
     set ww [expr {int($w/$xdiv)}]
     set wh [expr {int($h/$ydiv)}]
     lassign [ConstrainWindow 0 0 $ww $wh $aspectRatio] v1 v2 ww wh
+    return [list $ww $wh [expr {min($ww, $wh*21./9.)*$wh}]]
+}
+
+proc CalcSize {monitor numWindows} {
+    Debug "CalcSize $numWindows on monitor $monitor"
+    global monitorInfo
+    set w $monitorInfo($monitor,width)
+    set h $monitorInfo($monitor,height)
+    # most square grid unless another one gives bigger windows (e.g. 1 column on a portrait monitor)
+    lassign [SplitForN $numWindows] xdiv ydiv
+    lassign [GridWindowSize $w $h $xdiv $ydiv] ww wh score
+    for {set x 1} {$x<=$numWindows} {incr x} {
+        set y [expr {($numWindows+$x-1)/$x}]
+        lassign [GridWindowSize $w $h $x $y] cw ch cscore
+        if {$cscore > $score} {
+            Debug "Better grid $x x $y: $cw x $ch instead of $xdiv x $ydiv: $ww x $wh"
+            lassign [list $x $y $cw $ch $cscore] xdiv ydiv ww wh score
+        }
+    }
     return [list $ww $wh $xdiv $ydiv]
 }
 
