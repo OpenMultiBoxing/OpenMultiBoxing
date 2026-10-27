@@ -1520,7 +1520,8 @@ proc MouseBroadcastCheck {} {
         set w [twapi::get_window_at_location $x $y]
         set wType [IsOurs $w]
         #Debug "Window clicked is $w: $wType"
-        if {$wType>=3} {
+        # slot can be gone while its window is closing
+        if {$wType>=3 && [info exists slot2position([expr {$wType-2}])]} {
             set n [expr {$wType-2}]
             set p $slot2position($n)
             # scale
@@ -1576,6 +1577,9 @@ proc MouseBroadcastCheck {} {
             return
         }
         set n [expr {$wType-2}]
+        if {![info exists slot2position($n)]} {
+            return
+        }
         set p $slot2position($n)
         # scale
         lassign $settings($p,posXY) lx ly
@@ -1622,6 +1626,13 @@ proc PeriodicChecks {} {
     }
     if {$mouseBroadcast} {
         MouseBroadcastCheck
+    }
+    # Learn the focus window of captured windows as they get activated (see RefreshFocusHandle)
+    if {![catch {twapi::get_foreground_window} fg] && $fg != ""} {
+        set n [expr {[IsOurs $fg]-2}]
+        if {$n > 0} {
+            RefreshFocusHandle $n
+        }
     }
     if {$settings(mouseWatchInterval)} {
         set pauseSchedule [after $settings(mouseWatchInterval) PeriodicChecks]
@@ -2562,16 +2573,43 @@ proc validHandle {w} {
     expr {$w != $twapi::null_hwin && $w != "0 HWND"}
 }
 
-proc setFocusHandle {n} {
-    global slot2focus slot2handle
-    if {![info exists slot2handle($n)]} {
+# The focus handle may not be known yet at capture (window not active/ready yet, we then use the
+# top level window): look again when that window is the active one (background threads have no focus).
+# focusIsTop(slot) is the top level window handle when that's also its focus window (e.g. WoW): no need to look again.
+proc RefreshFocusHandle {n} {
+    global slot2focus slot2handle focusIsTop
+    if {![info exists slot2handle($n)] || $slot2focus($n) ne $slot2handle($n)} {
         return
     }
-    set w $slot2handle($n)
+    if {[info exists focusIsTop($n)] && $focusIsTop($n) eq $slot2handle($n)} {
+        return
+    }
+    if {[catch {twapi::get_focus_window_for_thread [twapi::get_window_thread $slot2handle($n)]} fh]} {
+        return
+    }
+    if {$fh eq $slot2focus($n)} {
+        set focusIsTop($n) $fh
+    } elseif {[validHandle $fh]} {
+        Debug "Focus for $n is now $fh"
+        set slot2focus($n) $fh
+    }
+}
+
+# Bring w to the front and set slot2focus(n) to the window that gets its keyboard input
+# (the top level window itself if the app has no focus window yet after a short wait)
+proc FindFocusHandle {n w} {
+    global slot2focus
     Foreground $w
     set tid [twapi::get_window_thread $w]
-    set focusHandle [twapi::get_focus_window_for_thread $tid]
-    Debug "NEWY Focus for $n is $focusHandle, tid $tid"
+    # the app sets its focus window when processing the activation
+    for {set i 0} {$i < 10} {incr i} {
+        set focusHandle [twapi::get_focus_window_for_thread $tid]
+        if {[validHandle $focusHandle]} {
+            break
+        }
+        after 20
+    }
+    Debug "Focus for $n is $focusHandle, tid $tid (after $i tries)"
     if {[validHandle $focusHandle]} {
         set slot2focus($n) $focusHandle
     } else {
@@ -2579,17 +2617,17 @@ proc setFocusHandle {n} {
     }
 }
 
+proc setFocusHandle {n} {
+    global slot2handle
+    if {![info exists slot2handle($n)]} {
+        return
+    }
+    FindFocusHandle $n $slot2handle($n)
+}
+
 proc updateListBox {n w wname} {
     global ourWindowHandles slot2handle slot2position nextWindow maxNumW settings slot2focus
-    Foreground $w
-    set tid [twapi::get_window_thread $w]
-    set focusHandle [twapi::get_focus_window_for_thread $tid]
-    Debug "NEWX Focus for $n is $focusHandle, tid $tid"
-    if {[validHandle $focusHandle]} {
-        set slot2focus($n) $focusHandle
-    } else {
-        set slot2focus($n) $w
-    }
+    FindFocusHandle $n $w
     set slot2handle($n) $w
     set slot2position($n) $n
     set ourWindowHandles($w) [expr 2+$n]
@@ -3119,16 +3157,85 @@ proc BroadcastKey {keyCode {delayMs 100}} {
 
 # Post key down/up to the window in slot i and track which keys we left down in which window
 proc PostKeyToSlot {i keyCode up} {
-    global slot2focus sentDown
-    set ev [expr {0x0100+$up}]
+    global sentDown
     if {$up} {
-        set lparam 0xC0000001
         unset -nocomplain sentDown($i,$keyCode)
     } else {
-        set lparam 0
         set sentDown($i,$keyCode) 1
     }
+    PostKeyMessage $i $keyCode $up
+}
+
+proc PostKeyMessage {i keyCode up} {
+    global slot2focus
+    set ev [expr {0x0100+$up}]
+    set lparam [expr {$up ? 0xC0000001 : 0}]
     CheckWindow [list twapi::PostMessage $slot2focus($i) $ev $keyCode $lparam] $i
+}
+
+# Same as PostKeyToSlot but, when settings(broadcastDelay) is set, posts after the window's lag
+# (from RollBroadcastLags). Lags are only re-rolled when no keys are held or posts pending so
+# the order of events within a window (modifiers before keys, down before up) is preserved.
+# Most apps (but not WoW) take modifiers from the real keyboard state when processing the key, so with
+# settings(broadcastDelayModifiersFlush) keys pressed with modifiers held (modsHeld) and their key up
+# are sent now, after the window's pending posts.
+# sentDown(slot,keyCode) is 2 for those (1 for delayed ones).
+proc QueueKeyToSlot {i keyCode up modsHeld} {
+    global settings sentDown bcLag bcLastT bcPending bcToken
+    set base $settings(broadcastDelay)
+    if {$base <= 0} {
+        PostKeyToSlot $i $keyCode $up
+        return
+    }
+    if {$up ? ([info exists sentDown($i,$keyCode)] && $sentDown($i,$keyCode) == 2) : $modsHeld} {
+        FlushPendingKeys $i
+        PostKeyToSlot $i $keyCode $up
+        if {!$up} {
+            set sentDown($i,$keyCode) 2
+        }
+        return
+    }
+    if {![info exists bcLag($i)]} {
+        set bcLag($i) [expr {$base + int(rand()*2*$base)}]
+    }
+    if {$up} {
+        unset -nocomplain sentDown($i,$keyCode)
+    } else {
+        set sentDown($i,$keyCode) 1
+    }
+    set now [clock milliseconds]
+    set t [expr {$now + $bcLag($i)}]
+    if {[info exists bcLastT($i)] && $bcLastT($i) > $t} {
+        set t $bcLastT($i)
+    }
+    set bcLastT($i) $t
+    set token [incr bcToken]
+    Debug "Key $keyCode up=$up to $i in [expr {$t-$now}] ms"
+    set bcPending($i,$token) [list [after [expr {$t-$now}] [list DelayedKeyPost $i $token]] $keyCode $up]
+}
+
+# Send the pending posts of slot i now, in order
+proc FlushPendingKeys {i} {
+    global bcPending sentDown
+    foreach k [lsort -dictionary [array names bcPending $i,*]] {
+        lassign $bcPending($k) id keyCode up
+        after cancel $id
+        unset bcPending($k)
+        Debug "Flushing key $keyCode up=$up to $i"
+        PostKeyMessage $i $keyCode $up
+        if {!$up && [info exists sentDown($i,$keyCode)]} {
+            set sentDown($i,$keyCode) 2
+        }
+    }
+}
+
+proc DelayedKeyPost {i token} {
+    global bcPending slot2focus
+    lassign $bcPending($i,$token) id keyCode up
+    unset bcPending($i,$token)
+    if {[info exists slot2focus($i)]} {
+        PostKeyMessage $i $keyCode $up
+    }
 }
 
 # Send key down to all windows except the one with the given slot number
@@ -3136,13 +3243,17 @@ proc PostKeyToSlot {i keyCode up} {
 # as focus may have changed in between (e.g. Ctrl-~ swap), otherwise the key stays stuck.
 # Use up=1 for key up, up=0 for key down
 proc BroadcastKeyToOther {n keyCode up} {
-    global slot2handle broadcastMap sentDown
+    global slot2handle broadcastMap sentDown settings bcPending
     # Remap key if needed
     if {[info exists broadcastMap($keyCode)]} {
         Debug "Remapping $keyCode to $broadcastMap($keyCode)"
         set keyCode $broadcastMap($keyCode)
     }
+    if {!$up} {
+        RefreshFocusHandle $n
+    }
     set skip [RRExcludedWindows]
+    set targets {}
     foreach {i w} [array get slot2handle] {
         if {$up} {
             if {![info exists sentDown($i,$keyCode)]} {
@@ -3151,14 +3262,59 @@ proc BroadcastKeyToOther {n keyCode up} {
         } elseif {$i==$n || [lsearch -exact $skip $i] >= 0} {
             continue
         }
-        PostKeyToSlot $i $keyCode $up
+        lappend targets $i
+    }
+    set modsHeld 0
+    if {!$up && $settings(broadcastDelay) > 0} {
+        if {[array size bcPending] == 0 && [array size sentDown] == 0} {
+            RollBroadcastLags $targets
+        }
+        if {$settings(broadcastDelayModifiersFlush)} {
+            set modsHeld [expr {[HeldModifiersMask] != 0}]
+        }
+    }
+    foreach i $targets {
+        QueueKeyToSlot $i $keyCode $up $modsHeld
+    }
+}
+
+# Spread the windows over [base, 3x base]: random order, each window in its own equal slice,
+# at a random point of the middle half of the slice, so they are at least base/count apart.
+proc RollBroadcastLags {slots} {
+    global settings bcLag
+    set base $settings(broadcastDelay)
+    set m [llength $slots]
+    if {$m == 0} {
+        return
+    }
+    set slice [expr {2.0*$base/$m}]
+    set shuffled {}
+    foreach i $slots {
+        lappend shuffled [list [expr {rand()}] $i]
+    }
+    set k 0
+    foreach e [lsort -real -index 0 $shuffled] {
+        set bcLag([lindex $e 1]) [expr {$base + int(($k + 0.25 + 0.5*rand())*$slice)}]
+        incr k
     }
 }
 
 # Send key up for all the keys we posted down and not up yet
 # (before hotkeys change focus and when broadcasting is turned off/paused)
 proc ReleaseBroadcastKeys {} {
-    global sentDown slot2handle rrSentDown
+    global sentDown slot2handle rrSentDown bcPending bcLastT
+    # Drop delayed downs, send delayed ups now (sentDown no longer has them)
+    foreach k [lsort -dictionary [array names bcPending]] {
+        lassign $bcPending($k) id keyCode up
+        after cancel $id
+        lassign [split $k ","] i
+        if {$up && [info exists slot2handle($i)]} {
+            Debug "Releasing pending key $keyCode for $i"
+            PostKeyMessage $i $keyCode 1
+        }
+    }
+    array unset bcPending *
+    array unset bcLastT *
     foreach k [array names sentDown] {
         lassign [split $k ","] i keyCode
         if {[info exists slot2handle($i)]} {
@@ -3327,6 +3483,12 @@ set rrExcludes {}
 array set broadcastMap {}
 # sentDown(slot,keyCode) exists when we posted key down to that slot without the up yet
 array set sentDown {}
+# settings(broadcastDelay) state: bcLag(slot) current lag, bcLastT(slot) time of the last scheduled post,
+# bcPending(slot,token) {afterId keyCode up} of posts not done yet
+array set bcLag {}
+array set bcLastT {}
+array set bcPending {}
+set bcToken 0
 # rrSentDown(keyCode): broadcast down (to windows/clients) without up yet
 array set rrSentDown {}
 # rrPendingMods(keyCode): modifiers held but not broadcast until a non modifier key is pressed
@@ -4588,6 +4750,8 @@ array set settings {
     mouseHoldCancel 500
     mouseBroadcastUsePostMessage 1
     rrDeferModifiers 1
+    broadcastDelay 0
+    broadcastDelayModifiersFlush 0
     connectTo ""
     listenPort 4464
     listen 0
