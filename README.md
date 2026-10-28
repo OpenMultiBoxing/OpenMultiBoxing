@@ -18,6 +18,7 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
    - Save different layouts as profiles (File > New Profile...) and cycle through them with the Ctrl-Shift-L (next) and Ctrl-Shift-Alt-L (previous) hotkeys. Pick which profiles are in the rotation with Profile > "Profiles in rotation..." (all but Default by default).
 - Any game or app: pick it in the Game menu or add its window title with Game > "Add game window title..." (use `*` to match a changing part, e.g. a version number in the title).
 - Instant swapping of windows; with keyboard hotkeys for fast switching to the next or any specific window.
+   - Change any hotkey in File > "Hotkeys...": click it and press the new key combination (right click clears it, Undo goes back).
 - Left and right mouse click broadcasting option (press W or both buttons or hold them for more than half a second (delay configurable in settings) to avoid broadcasting)
    - For applications that do not support mouse events through PostMessage, uncheck "Mouse broadcast: message mode" in the Options menu.
 - **Key broadcasting** when turned on, with exclusions (e.g W A S D for movement from main window)

@@ -769,7 +769,7 @@ proc ProfileRotationDialog {} {
         toplevel $tw
         wm title $tw "OMB Profiles in rotation"
         wm resizable $tw 0 0
-        grid [ttk::label $tw.l -text "Profiles cycled through by\n$settings(hk,nextProfile) (next) and $settings(hk,previousProfile) (previous):"] -padx 8 -pady 4 -sticky w
+        grid [ttk::label $tw.l -text "Profiles cycled through by\n[HK nextProfile] (next) and [HK previousProfile] (previous):"] -padx 8 -pady 4 -sticky w
         grid [ttk::button $tw.close -text Close -command [list destroy $tw]] -row 2 -padx 8 -pady 6
         UpdateHandles
     }
@@ -806,13 +806,14 @@ proc LoadSettings {} {
 }
 
 proc UnregisterHotkeys {} {
-    global allHotKeys hotkeyCombo
+    global allHotKeys hotkeyCombo hotkeyFailed
     Debug "Unregistering previous hotkeys"
     foreach hk $allHotKeys {
         twapi::unregister_hotkey $hk
     }
     set allHotKeys {}
     array unset hotkeyCombo *
+    array unset hotkeyFailed *
 }
 
 
@@ -892,26 +893,14 @@ proc AfterSettings {} {
 }
 
 proc RegisterAllHotkeys {} {
-    global settings maxNumW slot2handle
+    global settings maxNumW slot2handle hotkeyList
     UnregisterHotkeys
-    RegisterHotkey "Capture" hk,capture CaptureOrUpdate
-    RegisterHotkey "Start/Stop mouse tracking" hk,mouseTrack MouseTracking
-    RegisterHotkey "Focus next window" hk,focusNextWindow FocusNextWindow
-    RegisterHotkey "Focus previous window" hk,focusPreviousWindow FocusPreviousWindow
-    RegisterHotkey "Swap next window" hk,swapNextWindow SwapNextWindow
-    RegisterHotkey "Swap previous window" hk,swapPreviousWindow SwapPreviousWindow
-    RegisterHotkey "Focus follow mouse toggle" hk,focusFollowMouse FocusFollowMouseToggle
-    RegisterHotkey "Always on top toggle" hk,stayOnTopToggle StayOnTopToggle
-    RegisterHotkey "Overlay toggle" hk,overlayToggle OverlayToggle
-    RegisterHotkey "Broadcast toggle" hk,rrToggle RRToggle
-    RegisterHotkey "Focus main window" hk,focusMain FocusMain
-    RegisterHotkey "Reset all windows to saved positions" hk,resetAll ResetAll
-    RegisterHotkey "Start/Stop mouse broadcasting" hk,mouseBroadcast MouseBroadcast
-    RegisterHotkey "Next profile" hk,nextProfile NextProfile
-    RegisterHotkey "Previous profile" hk,previousProfile PreviousProfile
-    # Only take that hotkey from other apps when windows to skip are configured
-    if {[llength $settings(rrExcludeWindows)]} {
-        RegisterHotkey "Skip windows toggle" hk,rrExcludeToggle RRExcludeToggle
+    foreach {var msg callback} $hotkeyList {
+        # Only take that hotkey from other apps when windows to skip are configured
+        if {$var eq "hk,rrExcludeToggle" && ![llength $settings(rrExcludeWindows)]} {
+            continue
+        }
+        RegisterHotkey $msg $var $callback
     }
     for {set n 1} {$n < $maxNumW} {incr n} {
         if {[info exists slot2handle($n)]} {
@@ -1026,7 +1015,7 @@ proc UISetup {} {
     grid [ttk::button .bwl -text "Window Layout" -width $labelW -command WindowLayout] -row 1 -column 1
     tooltip .bwl "View or change the Window Layout"
     grid [ttk::button .b1  -text "Edit Settings" -width $labelW -command EditSettings] -row 2 -column 1
-    tooltip .b1 "Opens the editor to edit settings\nand reload them after save.\nLet's you change hotkeys like:\nSwap next window: $settings(hk1,swap)\nFocus next window: $settings(hk,focusNextWindow)\netc... See Help for details."
+    tooltip .b1 "Opens the editor to edit raw settings\nand reload them after save.\nHotkeys are changed with File > Hotkeys..."
     # label width - enough to fit "-9999 -9999"
     set width 10
     grid [frame .sep1 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
@@ -1035,16 +1024,12 @@ proc UISetup {} {
     grid [ttk::label .l3 -text "Resize to" -anchor e] [entry .e2 -textvariable windowSize -width $width] -padx 4 -sticky ew
     grid [ttk::label .l4 -text "Move to" -anchor e] [entry .e3 -textvariable pos -width $width] -padx 4 -sticky ew
     grid [ttk::checkbutton .csop -text "Wow window always on top" -variable stayOnTop] -columnspan 2
-    tooltip .csop "Whether that window should be on top of others.\nThis can be changed at anytime for the current focused window\nusing the Hotkey: $settings(hk,stayOnTopToggle)"
     grid [ttk::button .b2 -text " Capture " -command CaptureOrUpdate] -pady 5 -columnspan 2
-    tooltip .b2 "Capture or update window\nHotkey: $settings(hk,capture)"
     grid [listbox .lbw -height 6] -columnspan 2 -sticky ns
     bind .lbw <<ListboxSelect>> [list selectChanged %W]
     grid [ttk::checkbutton .cbCaptureFG -text "Capture using foreground window" -command UpdateForegroundMode -variable settings(captureForegroundWindow)] -columnspan 2
-    tooltip .cbCaptureFG "Instead of capturing the game window by name\n($settings(game))\nif checked, capture the current foreground window\nFor this to work you must use the hotkey:\n$settings(hk,capture)\n\nUse the Game menu to turn this on"
     UpdateForegroundMode
     grid [ttk::checkbutton .cboverlay -text "Show overlay" -variable settings(showOverlay) -command "OverlayUpdate; SaveSettings"] [ttk::button .cbocfg -text "Overlay config" -command OverlayConfig]
-    tooltip .cboverlay "Show/Hide the overlay info\nHotkey: $settings(hk,overlayToggle)"
     tooltip .cbocfg "Opens the overlay config which let's you configure\nborder, color, positions, etc... for the overlay"
 
     if {$hasRR||$hasBR} {
@@ -1056,8 +1041,7 @@ proc UISetup {} {
         }
         grid [frame .sepRR -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
         grid [ttk::label .lRR -text "⟳ $RRlabel settings:" -font "*-*-bold" -anchor sw] -padx 4 -columnspan 2 -sticky w
-        grid [ttk::checkbutton .cbRR -text "$RRlabel ($settings(hk,rrToggle))" -variable rrOn -command RRUpdate] -padx 4 -columnspan 2 -sticky w
-        tooltip .cbRR "Toggle $rrlabel mode\nAlso turns off mouse focus and restore as needed while on\nHotkey: $settings(hk,rrToggle)"
+        grid [ttk::checkbutton .cbRR -variable rrOn -command RRUpdate] -padx 4 -columnspan 2 -sticky w
         grid [ttk::label .lrrK -text "$RRlabel to other windows all but these keys:"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eRR -textvariable settings(rrKeyListExclude) -width $width] -columnspan 2 -padx 4 -sticky ew
         bind .eRR <Return> RRKeysListChange
@@ -1073,9 +1057,7 @@ proc UISetup {} {
         bind .eBMap <Return> RRKeysListChange
 
         frame .rrX
-        ttk::checkbutton .rrX.cb -text "Skip ($settings(hk,rrExcludeToggle)):" \
-            -variable settings(rrExcludeWindowsOn) -command "RRExcludeUpdate; SaveSettings"
-        tooltip .rrX.cb "When checked, keys and mouse clicks are not $rrlabel to the selected windows\nUnchecked: $rrlabel to all windows\nOnly available once windows are selected\nHotkey: $settings(hk,rrExcludeToggle)"
+        ttk::checkbutton .rrX.cb -variable settings(rrExcludeWindowsOn) -command "RRExcludeUpdate; SaveSettings"
         ttk::menubutton .rrX.mb -textvariable rrExcludeText -menu .rrX.mb.menu
         menu .rrX.mb.menu -tearoff 0 -postcommand RRExcludeMenu
         tooltip .rrX.mb "Select which window(s) don't get $rrlabel keys and mouse clicks\nThis follows the window (OMB number) when swapped"
@@ -1088,9 +1070,7 @@ proc UISetup {} {
     grid [frame .sep2 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
     grid [ttk::label .l6 -text "🖰 Mouse settings:" -font "*-*-bold" -anchor sw] -padx 4 -columnspan 2 -sticky w
     grid [ttk::checkbutton .mf -text "Focus follows mouse" -variable mouseFollow -command UpdateMouseFollow] -padx 4 -columnspan 2 -sticky w
-    tooltip .mf "Toggle focus follow mouse mode\nHotkey: $settings(hk,focusFollowMouse)"
     grid [ttk::checkbutton .mbc -text "Broadcast mouse clicks" -variable mouseBroadcast] -padx 4 -columnspan 2 -sticky w
-    tooltip .mbc "Toggle mouse click broadcasting\nHotkey: $settings(hk,mouseBroadcast)"
     grid [frame .sep3 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
     frame .net
     # initial texts so the heights below are measured with text
@@ -1108,6 +1088,34 @@ proc UISetup {} {
     tooltip .l_bottom "Click to check for update from $vers"
     grid rowconfigure . 9 -weight 1
     grid columnconfigure . 1 -weight 1
+    UpdateHotkeyTexts
+}
+
+# Hotkey for display, e.g. [HK capture]
+proc HK {name} {
+    global settings
+    HotkeyDisplay $settings(hk,$name)
+}
+
+# Texts showing hotkeys, updated when they change
+proc UpdateHotkeyTexts {} {
+    global settings RRlabel rrlabel
+    tooltip .csop "Whether that window should be on top of others.\nThis can be changed at anytime for the current focused window\nusing the Hotkey: [HK stayOnTopToggle]"
+    tooltip .b2 "Capture or update window\nHotkey: [HK capture]"
+    tooltip .cbCaptureFG "Instead of capturing the game window by name\n($settings(game))\nif checked, capture the current foreground window\nFor this to work you must use the hotkey:\n[HK capture]\n\nUse the Game menu to turn this on"
+    tooltip .cboverlay "Show/Hide the overlay info\nHotkey: [HK overlayToggle]"
+    if {[winfo exists .cbRR]} {
+        .cbRR configure -text "$RRlabel ([HK rrToggle])"
+        tooltip .cbRR "Toggle $rrlabel mode\nAlso turns off mouse focus and restore as needed while on\nHotkey: [HK rrToggle]"
+        .rrX.cb configure -text "Skip ([HK rrExcludeToggle]):"
+        tooltip .rrX.cb "When checked, keys and mouse clicks are not $rrlabel to the selected windows\nUnchecked: $rrlabel to all windows\nOnly available once windows are selected\nHotkey: [HK rrExcludeToggle]"
+    }
+    tooltip .mf "Toggle focus follow mouse mode\nHotkey: [HK focusFollowMouse]"
+    tooltip .mbc "Toggle mouse click broadcasting\nHotkey: [HK mouseBroadcast]"
+    if {[winfo exists .mbar.file]} {
+        .mbar.file entryconfigure "Reset all windows*" -label "Reset all windows ([HK resetAll])"
+        UpdateProfilesMenu
+    }
 }
 
 proc UpdateForegroundMode {} {
@@ -1226,8 +1234,8 @@ proc UpdateProfilesMenu {} {
         $m2 add radiobutton -label $p -variable settings(profile) -command LoadProfile
     }
     $m2 add separator
-    $m2 add command -label "Next profile ($settings(hk,nextProfile))" -command NextProfile
-    $m2 add command -label "Previous profile ($settings(hk,previousProfile))" -command PreviousProfile
+    $m2 add command -label "Next profile ([HK nextProfile])" -command NextProfile
+    $m2 add command -label "Previous profile ([HK previousProfile])" -command PreviousProfile
     $m2 add command -label "Profiles in rotation..." -command ProfileRotationDialog
     $m2 add separator
     $m2 add command -label "Refresh Profiles" -command RefreshProfiles
@@ -1251,13 +1259,14 @@ proc MenuSetup {} {
     $m1 add command -label "Connect to..." -command Connect
     $m1 add separator
     $m1 add command -label "New Profile..." -command NewProfile
+    $m1 add command -label "Hotkeys..." -command HotkeysDialog
     $m1 add command -label "Edit raw settings..." -command EditSettings
     $m1 add command -label "Save settings" -command SaveSettings
     $m1 add command -label "Reload settings" -command LoadSettings
     $m1 add separator
     $m1 add command -label "Clipboard copy/paster..." -command ClipboardManager
     $m1 add separator
-    $m1 add command -label "Reset all windows ($settings(hk,resetAll))" -command ResetAll
+    $m1 add command -label "Reset all windows ([HK resetAll])" -command ResetAll
     $m1 add separator
     $m1 add command -label "Close all games..." -command CloseAllGames
     $m1 add command -label "Close all games and Exit..." -command "CloseAllGames 1"
@@ -1349,7 +1358,7 @@ proc MouseTracking {} {
     toplevel $tw
     wm title $tw "OMB Mouse Tracking"
     grid [ttk::button $tw.bml -width 14 -text "Track mouse" -command StartStopMouseTrack] [entry $tw.emt -textvariable mouseCoords -width 14] -padx 4 -sticky w
-    tooltip $tw.bml "Start/Stop mouse tracking\nHotkey: $settings(hk,mouseTrack)"
+    tooltip $tw.bml "Start/Stop mouse tracking\nHotkey: [HK mouseTrack]"
     grid [ttk::label $tw.la -text "Coords in area"] [entry $tw.ema -textvariable mouseArea -width 14] -padx 4 -sticky w
     grid [ttk::label $tw.lcl -text "Relative Coords"] [entry $tw.eml -textvariable mouseLocalCoords -width 14] -padx 4 -sticky w
     UpdateHandles
@@ -2065,6 +2074,29 @@ if {![info exists allHotKeys]} {
 }
 # hotkeyCombo(modifiersMask,vk) -> hotkey description, so broadcasting can skip our own hotkeys
 array set hotkeyCombo {}
+# hotkeyFailed(settings key) -> description, for the hotkeys that couldn't be registered
+array set hotkeyFailed {}
+
+# Global hotkeys: settings key, description (also shown in the Hotkeys dialog) and command
+# (per window ones are hk<n>,focus and hk<n>,swap, see RegisterPerWindowHotkey)
+set hotkeyList {
+    hk,capture "Capture" CaptureOrUpdate
+    hk,focusNextWindow "Focus next window" FocusNextWindow
+    hk,focusPreviousWindow "Focus previous window" FocusPreviousWindow
+    hk,swapNextWindow "Swap next window" SwapNextWindow
+    hk,swapPreviousWindow "Swap previous window" SwapPreviousWindow
+    hk,focusMain "Focus main window" FocusMain
+    hk,rrToggle "Broadcast toggle" RRToggle
+    hk,rrExcludeToggle "Skip windows toggle" RRExcludeToggle
+    hk,mouseBroadcast "Start/Stop mouse broadcasting" MouseBroadcast
+    hk,focusFollowMouse "Focus follow mouse toggle" FocusFollowMouseToggle
+    hk,stayOnTopToggle "Always on top toggle" StayOnTopToggle
+    hk,overlayToggle "Overlay toggle" OverlayToggle
+    hk,resetAll "Reset all windows to saved positions" ResetAll
+    hk,nextProfile "Next profile" NextProfile
+    hk,previousProfile "Previous profile" PreviousProfile
+    hk,mouseTrack "Start/Stop mouse tracking" MouseTracking
+}
 
 # Returns {modifiersMask vk} (MOD_ALT 1, MOD_CONTROL 2, MOD_SHIFT 4, MOD_WIN 8) for a hotkey
 # like Ctrl-Shift-F1 or Ctrl-0xC0, or empty if not understood
@@ -2082,10 +2114,11 @@ proc HotkeyToModsVk {hk} {
         }
     }
     set k [lindex $parts end]
-    if {[string is integer -strict $k]} {
-        set vk [expr {$k}]
-    } elseif {[string length $k] == 1} {
+    # same order as twapi::register_hotkey: 1 is the key, not the code 1
+    if {[string length $k] == 1} {
         lassign [twapi::VkKeyScan $k] x vk
+    } elseif {[string is integer -strict $k]} {
+        set vk [expr {$k}]
     } elseif {[info exists twapi::vk_map([string toupper $k])]} {
         set vk [expr [lindex $twapi::vk_map([string toupper $k]) 0]]
     } else {
@@ -2095,7 +2128,7 @@ proc HotkeyToModsVk {hk} {
 }
 
 proc RegisterHotkey {msg var callback} {
-    global settings allHotKeys hotkeyCombo
+    global settings allHotKeys hotkeyCombo hotkeyFailed
     set hk $settings($var)
     Debug "RegisterHotkey $hk $msg $var $callback"
     if {$hk == ""} {
@@ -2104,8 +2137,8 @@ proc RegisterHotkey {msg var callback} {
     }
     if {[catch {twapi::register_hotkey $hk [list HandleHotKey $msg $callback]} err]} {
         puts "hotkey error $hk for $msg: $err"
-        OmbError "OpenMultiBoxing HotKey error" \
-         "Conflict for hotkey for $msg, change $var in settings to use something different than $hk"
+        set hotkeyFailed($var) $msg
+        HotkeyConflict
     } else {
         lappend allHotKeys $err
         lassign [HotkeyToModsVk $hk] mods vk
@@ -2115,6 +2148,319 @@ proc RegisterHotkey {msg var callback} {
             Debug "Couldn't parse hotkey $hk for broadcast skipping"
         }
     }
+}
+
+# --- Hotkeys dialog: click a hotkey then press the new key combination, right click clears it
+
+# Hotkey (as in settings and for twapi::register_hotkey) for a modifiers mask and virtual key code,
+# e.g. Ctrl-Shift-F1, or Ctrl-0xC0 when the key has no name
+proc HotkeyName {mods vk} {
+    set vk [expr {$vk}]
+    set name ""
+    foreach {bit m} {2 Ctrl 4 Shift 1 Alt 8 Win} {
+        if {$mods & $bit} {
+            append name "$m-"
+        }
+    }
+    set names {8 {BACKSPACE BACK} 9 TAB 13 {ENTER RETURN} 19 PAUSE 27 {ESC ESCAPE} 32 SPACE
+        33 {PGUP PRIOR} 34 {PGDN NEXT} 35 END 36 HOME 37 LEFT 38 UP 39 RIGHT 40 DOWN 45 {INSERT INS}
+        46 {DELETE DEL} 106 MULTIPLY 107 ADD 109 SUBTRACT 110 DECIMAL 111 DIVIDE 144 NUMLOCK 145 {SCROLL SCROLLLOCK}}
+    set keys {}
+    if {($vk >= 0x30 && $vk <= 0x39) || ($vk >= 0x41 && $vk <= 0x5A)} {
+        set keys [list [format %c $vk]]
+    } elseif {$vk >= 0x70 && $vk <= 0x87} {
+        set keys [list F[expr {$vk - 0x6F}]]
+    } elseif {$vk >= 0x60 && $vk <= 0x69} {
+        set keys [list NUMPAD[expr {$vk - 0x60}]]
+    } elseif {[dict exists $names $vk]} {
+        set keys [dict get $names $vk]
+    }
+    # first name that parses back to the same key (layouts, twapi names)
+    foreach k $keys {
+        if {[HotkeyToModsVk $name$k] eq [list $mods $vk]} {
+            return $name$k
+        }
+    }
+    return [format "%s0x%02X" $name $vk]
+}
+
+# Hotkey as shown to users: Ctrl-0xC0 is Ctrl-~ (twapi only takes the code for punctuation keys)
+proc HotkeyDisplay {hk} {
+    if {![regexp {^(.*?)(0[xX][0-9a-fA-F]+)$} $hk all mods vk]} {
+        return $hk
+    }
+    # character of that key in the current keyboard layout (MAPVK_VK_TO_CHAR), high bit is dead keys
+    set c [expr {[twapi::MapVirtualKey $vk 2] & 0xFFFF}]
+    if {$c <= 32} {
+        return $hk
+    }
+    set c [format %c $c]
+    if {$c eq "`"} {
+        # the US keyboard "~ key"
+        set c "~"
+    }
+    return $mods$c
+}
+
+proc HotkeyLabel {var} {
+    global hotkeyList
+    if {[regexp {^hk(\d+),(focus|swap)$} $var all n what]} {
+        return "[string totitle $what] window $n"
+    }
+    foreach {v msg cb} $hotkeyList {
+        if {$v eq $var} {
+            return $msg
+        }
+    }
+    return $var
+}
+
+# Shows the Hotkeys dialog (once, after the current registrations) when some couldn't be registered
+set hotkeyConflictPending 0
+proc HotkeyConflict {} {
+    global hotkeyConflictPending
+    if {!$hotkeyConflictPending} {
+        set hotkeyConflictPending 1
+        after idle {set hotkeyConflictPending 0; HotkeysDialog}
+    }
+}
+
+# Settings key being captured, if any
+set hotkeyCapture ""
+# Hotkeys dialog message about the last change
+set hotkeyNote ""
+# Hotkeys before each change made since the dialog opened, for Undo
+set hotkeyUndo {}
+# Hotkeys defaults, for Restore defaults
+array set hotkeyDefaults {}
+
+proc HotkeysDialog {} {
+    global hotkeyList hotkeyButtons maxNumW settings hotkeyUndo
+    set tw .hotkeys
+    if {![winfo exists $tw]} {
+        toplevel $tw
+        wm title $tw "OMB Hotkeys"
+        wm resizable $tw 0 0
+        wm protocol $tw WM_DELETE_WINDOW {HotkeysDialogClose 1}
+        ttk::style configure OmbHotkeyFailed.TButton -foreground red
+        ttk::style configure OmbHotkeyCapture.TButton -font WOBBold
+        array unset hotkeyButtons
+        set hotkeyUndo {}
+        bind $tw <Control-z> HotkeysUndo
+        grid [ttk::label $tw.l -text "Click a hotkey then press the new key combination (Esc cancels), right click clears it."] \
+            -columnspan 2 -padx 8 -pady 4 -sticky w
+        grid [ttk::labelframe $tw.g -text "General"] [ttk::labelframe $tw.w -text "Windows"] -padx 8 -sticky nsew
+        set row 0
+        foreach {var msg cb} $hotkeyList {
+            grid [ttk::label $tw.g.l$row -text $msg] [HotkeyButton $tw.g.b$row $var] -padx 4 -pady 1 -sticky w
+            incr row
+        }
+        grid x [ttk::label $tw.w.hf -text "Focus"] [ttk::label $tw.w.hs -text "Swap"] -padx 4
+        set num 10
+        while {[info exists settings(hk[expr {$num+1}],focus)] || [info exists settings(hk[expr {$num+1}],swap)] || $num < $maxNumW-1} {
+            incr num
+        }
+        for {set n 1} {$n <= $num} {incr n} {
+            grid [ttk::label $tw.w.l$n -text "Window $n"] [HotkeyButton $tw.w.f$n hk$n,focus] [HotkeyButton $tw.w.s$n hk$n,swap] \
+                -padx 4 -pady 1 -sticky w
+        }
+        grid [ttk::label $tw.status -foreground red -wraplength 700] -columnspan 2 -padx 8 -pady {4 0} -sticky ew
+        # wrap at the window width (set by the hotkeys frames)
+        bind $tw.status <Configure> {%W configure -wraplength %w}
+        grid [ttk::frame $tw.b] -columnspan 2 -pady 6
+        pack [ttk::button $tw.b.undo -text "Undo" -command HotkeysUndo] \
+            [ttk::button $tw.b.def -text "Restore defaults" -command HotkeysDefaults] \
+            [ttk::button $tw.b.close -text Close -command HotkeysDialogClose] -side left -padx 4
+        tooltip $tw.b.undo "Undo the last change (Ctrl-Z)\nrepeat to go back to the hotkeys as they were when this window opened"
+        UpdateHandles
+    }
+    HotkeysDialogRefresh
+    wm state $tw normal
+    raise $tw
+}
+
+proc HotkeyButton {b var} {
+    global hotkeyButtons
+    ttk::button $b -width -20 -command [list HotkeyCapture $var]
+    bind $b <Button-3> [list HotkeySet $var ""]
+    # while capturing, keys (Tab, Alt, Space...) don't do their usual thing
+    bind $b <KeyPress> "if {\[HotkeyKey [list $var] %k\]} break"
+    bind $b <KeyRelease> "if {\$hotkeyCapture eq {$var}} break"
+    bind $b <FocusOut> [list HotkeyCaptureEnd $var]
+    set hotkeyButtons($var) $b
+    return $b
+}
+
+proc HotkeysDialogRefresh {} {
+    global settings hotkeyButtons hotkeyFailed hotkeyCapture hotkeyNote hotkeyUndo
+    if {![winfo exists .hotkeys]} {
+        return
+    }
+    foreach var [array names hotkeyButtons] {
+        set b $hotkeyButtons($var)
+        set hk [HotkeyDisplay [expr {[info exists settings($var)] ? $settings($var) : ""}]]
+        if {$var eq $hotkeyCapture} {
+            $b configure -text "Press keys..." -style OmbHotkeyCapture.TButton
+        } elseif {[info exists hotkeyFailed($var)]} {
+            $b configure -text $hk -style OmbHotkeyFailed.TButton
+        } else {
+            $b configure -text $hk -style TButton
+        }
+    }
+    set status $hotkeyNote
+    set failed {}
+    foreach var [lsort [array names hotkeyFailed]] {
+        lappend failed "$hotkeyFailed($var) ([HotkeyDisplay $settings($var)])"
+    }
+    if {[llength $failed]} {
+        lappend status "Hotkeys in red are already used by another application: [join $failed {, }]." \
+            "Click them to pick different keys."
+    }
+    # (space: keeps the one line height when empty)
+    .hotkeys.status configure -text [expr {[llength $status] ? [join $status "\n"] : " "}]
+    .hotkeys.b.undo state [expr {[llength $hotkeyUndo] ? "!disabled" : "disabled"}]
+}
+
+proc HotkeyCapture {var} {
+    global hotkeyCapture hotkeyOk hotkeyButtons hotkeyNote
+    if {$hotkeyCapture eq $var} {
+        # clicking again cancels
+        HotkeyCaptureEnd
+        return
+    }
+    if {$hotkeyCapture eq ""} {
+        # so our current hotkeys reach the dialog instead of triggering
+        UnregisterHotkeys
+        set hotkeyOk 0
+    }
+    set hotkeyNote ""
+    set hotkeyCapture $var
+    focus $hotkeyButtons($var)
+    HotkeysDialogRefresh
+}
+
+proc HotkeyCaptureEnd {{var ""}} {
+    global hotkeyCapture hotkeyOk
+    if {$hotkeyCapture eq "" || ($var ne "" && $var ne $hotkeyCapture)} {
+        return
+    }
+    set hotkeyCapture ""
+    set hotkeyOk 1
+    RegisterAllHotkeys
+    HotkeysDialogRefresh
+}
+
+# Returns 1 when the key was for the capture
+proc HotkeyKey {var vk} {
+    global hotkeyCapture
+    if {$hotkeyCapture ne $var} {
+        return 0
+    }
+    # modifiers alone: wait for the actual key
+    if {$vk in {16 17 18 91 92 160 161 162 163 164 165}} {
+        return 1
+    }
+    set mods [HeldModifiersMask]
+    if {$vk == 0x1B && $mods == 0} {
+        HotkeyCaptureEnd
+        return 1
+    }
+    set hk [HotkeyName $mods $vk]
+    Debug "Hotkey capture for $var: vk $vk mods $mods -> $hk"
+    HotkeySet $var $hk
+    return 1
+}
+
+proc HotkeySet {var hk} {
+    global settings hotkeyCapture hotkeyNote
+    set hotkeyNote {}
+    set before [HotkeysSnapshot]
+    set combo [HotkeyToModsVk $hk]
+    if {$combo ne ""} {
+        # like the WoW key bindings: taking a key unbinds it from the other hotkey
+        foreach other [array names settings hk*,*] {
+            if {$other ne $var && $settings($other) ne "" && [HotkeyToModsVk $settings($other)] eq $combo} {
+                Debug "Hotkey $hk cleared from $other"
+                set settings($other) ""
+                lappend hotkeyNote "[HotkeyDisplay $hk] was used by [HotkeyLabel $other], now cleared."
+            }
+        }
+    }
+    Debug "Hotkey $var set to \"$hk\""
+    set settings($var) $hk
+    HotkeysUndoPush $before
+    HotkeysChanged
+}
+
+# (can be undone so no confirmation)
+proc HotkeysDefaults {} {
+    global settings hotkeyDefaults hotkeyNote
+    set before [HotkeysSnapshot]
+    array unset settings hk*,*
+    array set settings [array get hotkeyDefaults]
+    set hotkeyNote {}
+    HotkeysUndoPush $before
+    HotkeysChanged
+}
+
+proc HotkeysSnapshot {} {
+    global settings
+    lsort -stride 2 [array get settings hk*,*]
+}
+
+proc HotkeysUndoPush {before} {
+    global hotkeyUndo
+    if {$before ne [HotkeysSnapshot]} {
+        lappend hotkeyUndo $before
+    }
+}
+
+proc HotkeysUndo {} {
+    global settings hotkeyUndo hotkeyNote
+    if {![llength $hotkeyUndo]} {
+        return
+    }
+    array set before [lindex $hotkeyUndo end]
+    set hotkeyUndo [lrange $hotkeyUndo 0 end-1]
+    set changes {}
+    foreach var [lsort -unique -dictionary [concat [array names settings hk*,*] [array names before]]] {
+        set old [expr {[info exists before($var)] ? $before($var) : ""}]
+        set cur [expr {[info exists settings($var)] ? $settings($var) : ""}]
+        if {$old ne $cur} {
+            lappend changes "[HotkeyLabel $var] back to [expr {$old eq "" ? "none" : [HotkeyDisplay $old]}]"
+        }
+    }
+    Debug "Hotkeys undo: $changes"
+    if {[llength $changes] > 3} {
+        set hotkeyNote [list "Undone: [llength $changes] hotkeys restored."]
+    } else {
+        set hotkeyNote [list "Undone: [join $changes {, }]."]
+    }
+    array unset settings hk*,*
+    array set settings [array get before]
+    HotkeysChanged
+}
+
+proc HotkeysChanged {} {
+    global hotkeyCapture
+    SaveSettings
+    UpdateHotkeyTexts
+    if {$hotkeyCapture ne ""} {
+        HotkeyCaptureEnd
+    } else {
+        RegisterAllHotkeys
+        HotkeysDialogRefresh
+    }
+}
+
+proc HotkeysDialogClose {{fromWm 0}} {
+    global hotkeyCapture
+    if {$fromWm && $hotkeyCapture ne ""} {
+        # e.g. Alt-F4 being captured
+        return
+    }
+    HotkeyCaptureEnd
+    destroy .hotkeys
 }
 
 proc FindOtherCopy {} {
@@ -2430,7 +2776,7 @@ proc UpdateOurWindowHandles {} {
         }
         Debug "$w -> $wh -> $tl"
         set val 2
-        if {$w=="." || $w==".clip" || $w==".newProfile" || $w==".connect"} {
+        if {$w in {. .clip .newProfile .connect .profileRotation .hotkeys}} {
             Debug "Found $w to pause"
             set val 1
         }
@@ -4758,6 +5104,7 @@ array set settings {
 }
 
 set settings(mouseInsideGameWindowFocuses) [expr {$hasRR||$hasBR}]
+array set hotkeyDefaults [array get settings hk*,*]
 
 
 # globals

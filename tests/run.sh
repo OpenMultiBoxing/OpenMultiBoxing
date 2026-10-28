@@ -1,0 +1,31 @@
+#!/bin/bash
+# Runs tests/*_test.tcl (or the given ones) with the Tcl/Tk/twapi bundled in an OMB binary:
+# the binary sources an OpenMultiBoxing.tcl found next to it, here tests/runner.tcl.
+# OMB_EXE: the binary to use, else the one in tests/bin/, downloaded from the latest release the first time.
+# OMB_TEST_APP: the .tcl under test, else ../OpenMultiBoxing.tcl.
+set -e
+dir=$(cd "$(dirname "$0")" && pwd -W)
+app=${OMB_TEST_APP:-$dir/../OpenMultiBoxing.tcl}
+exe=${OMB_EXE:-$(ls "$dir"/bin/OpenMultiBoxing-v*.exe 2>/dev/null | head -1)}
+if [ -z "$exe" ]; then
+    url=$(curl -fsS https://api.github.com/repos/OpenMultiBoxing/OpenMultiBoxing/releases/latest |
+        grep -o '"browser_download_url": *"[^"]*\.zip"' | grep -o 'https://[^"]*')
+    echo "Downloading $url"
+    mkdir -p "$dir/bin"
+    curl -fsSL -o "$dir/bin/omb.zip" "$url"
+    unzip -o -q "$dir/bin/omb.zip" 'OpenMultiBoxing-v*.exe' -d "$dir/bin"
+    rm "$dir/bin/omb.zip"
+    exe=$(ls "$dir"/bin/OpenMultiBoxing-v*.exe | head -1)
+fi
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+cp "$exe" "$work/"
+cp "$dir/runner.tcl" "$work/OpenMultiBoxing.tcl"
+tests=("$@")
+[ ${#tests[@]} -eq 0 ] && tests=("$dir"/*_test.tcl)
+rc=0
+for t in "${tests[@]}"; do
+    OMB_TEST_APP=$app OMB_TEST_SCRIPT=$t OMB_TEST_OUT=$work/out.txt timeout 60 "$work/$(basename "$exe")" || rc=1
+    cat "$work/out.txt"
+done
+exit $rc
