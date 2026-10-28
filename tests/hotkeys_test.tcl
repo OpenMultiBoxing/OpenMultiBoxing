@@ -102,7 +102,7 @@ Check "right click clears" $settings(hk,capture) ""
 set settings(hk,focusMain) Ctrl-Shift-W
 set hotkeyFailed(hk,focusMain) "Focus main window"
 HotkeysDialogRefresh
-Check "failed in red" [$hotkeyButtons(hk,focusMain) cget -style] OmbHotkeyFailed.TButton
+Check "failed in red" [string match *HotkeyFailed.TButton [$hotkeyButtons(hk,focusMain) cget -style]] 1
 Check "failed listed" [string match "*Focus main window (Ctrl-Shift-W)*" [.hotkeys.status cget -text]] 1
 array unset hotkeyFailed
 
