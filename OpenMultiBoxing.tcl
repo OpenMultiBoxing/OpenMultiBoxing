@@ -5186,6 +5186,23 @@ if {![winfo exists .logo]} {
     SaveSettings
 }
 
+# First launch: wide enough for the menu bar to fit on one line (can still be made narrower)
+proc FitMenuBar {} {
+    update idletasks
+    # Windows menu bar items are their label plus about one character and a pixel on each side
+    set pad [expr {2*[font measure TkMenuFont 0]+2}]
+    set w $pad
+    for {set i 0} {$i <= [.mbar index end]} {incr i} {
+        if {[.mbar type $i] eq "cascade"} {
+            set w [expr {$w + [font measure TkMenuFont [.mbar entrycget $i -label]] + $pad}]
+        }
+    }
+    if {$w > [winfo reqwidth .]} {
+        Debug "Widening main window from [winfo reqwidth .] to $w for the menu bar"
+        wm geometry . ${w}x[winfo reqheight .]
+    }
+}
+
 # --- main / tweak me ---
 puts "OpenMultiBoxing $vers started..."
 Defer 100 FindExisting
@@ -5193,6 +5210,8 @@ set bottomText "OpenMultiBoxing $vers"
 wm state . normal
 if {[info exists settings(mainWindowGeometry)]} {
     catch {wm geometry . $settings(mainWindowGeometry)}
+} else {
+    FitMenuBar
 }
 bind . <Configure> {set settings(mainWindowGeometry) [wm geometry .]}
 
