@@ -2256,7 +2256,7 @@ proc HotkeysDialog {} {
             incr row
         }
         grid x [ttk::label $tw.w.hf -text "Focus"] [ttk::label $tw.w.hs -text "Swap"] -padx 4
-        set num 10
+        set num 12
         while {[info exists settings(hk[expr {$num+1}],focus)] || [info exists settings(hk[expr {$num+1}],swap)] || $num < $maxNumW-1} {
             incr num
         }
@@ -5017,7 +5017,7 @@ proc UpdateMouseDelay {} {
 #---- settings and initial setup
 
 # default hotkeys (change/add more in you OpenMultiBoxingSettings.tcl)
-for {set i 1} {$i<=10} {incr i} {
+for {set i 1} {$i<=12} {incr i} {
     set settings(hk$i,focus) "Ctrl-F$i"
     set settings(hk$i,swap) "Ctrl-Shift-F$i"
 }

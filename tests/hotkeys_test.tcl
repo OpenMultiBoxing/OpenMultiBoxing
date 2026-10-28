@@ -2,7 +2,7 @@
 source [file join [file dirname [info script]] lib.tcl]
 LoadProcs $env(OMB_TEST_APP) {
     "set hotkeyList *" "set hotkeyCapture *" "set hotkeyNote *" "set hotkeyConflictPending *"
-    "array set hotkeyFailed *" "array set hotkeyDefaults *" "array set settings *" "for {set i 1} {$i<=10}*"
+    "array set hotkeyFailed *" "array set hotkeyDefaults *" "array set settings *" "for {set i 1} {$i<=12}*"
 }
 
 # --- names
@@ -70,7 +70,8 @@ proc Key {var vk {mods 0}} {
 HotkeysDialog
 update
 set statusHeight [winfo reqheight .hotkeys.status]
-Check "window 10 row" [winfo exists .hotkeys.w.s10] 1
+Check "window 12 row" [$hotkeyButtons(hk12,swap) cget -text] Ctrl-Shift-F12
+Check "no window 13 row" [winfo exists .hotkeys.w.s13] 0
 Check "~ shown" [$hotkeyButtons(hk,swapNextWindow) cget -text] "Ctrl-~"
 
 $hotkeyButtons(hk1,focus) invoke
@@ -128,12 +129,12 @@ Check "clear undoable" [llength $hotkeyUndo] 1
 event generate $hotkeyButtons(hk,capture) <Button-3>
 update
 Check "no-op change not undoable" [llength $hotkeyUndo] 1
-set settings(hk11,focus) Ctrl-Alt-1
+set settings(hk13,focus) Ctrl-Alt-1
 HotkeysDefaults
 Check "defaults capture" $settings(hk,capture) Ctrl-Shift-C
-Check "defaults hk11" [info exists settings(hk11,focus)] 0
+Check "defaults hk13" [info exists settings(hk13,focus)] 0
 HotkeysUndo
-Check "undo defaults hk11" $settings(hk11,focus) Ctrl-Alt-1
+Check "undo defaults hk13" $settings(hk13,focus) Ctrl-Alt-1
 Check "undo defaults capture" $settings(hk,capture) ""
 
 HotkeysDialogClose
