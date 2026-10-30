@@ -5064,11 +5064,16 @@ proc MirrorInit {} {
 
 # Old binaries (before v10) can run this script after an update but lack cffi
 proc MirrorCheckBinary {} {
+    global oldVersion vers
     if {[MirrorInit]} {
         return 1
     }
+    set binVers ""
+    if {[info exists oldVersion] && $oldVersion ne $vers} {
+        set binVers " ($oldVersion)"
+    }
     set ans [OmbMessage -type yesno -icon warning -title "Outdated binary for Mirrors" \
-        -message "Mirrors need the OpenMultiBoxing v10.0.0 or newer .exe (your .exe is older and lacks the needed component, only the script got updated).\n\nDownload and extract the latest OpenMultiBoxing zip (Help menu: Get the newest binary release).\n\nOpen the download page now?"]
+        -message "Mirrors need the OpenMultiBoxing v10.0.0 or newer .exe (your .exe$binVers is older and lacks the needed component, only the script got updated).\n\nDownload and extract the latest OpenMultiBoxing zip (Help menu: Get the newest binary release).\n\nOpen the download page now?"]
     if {$ans eq "yes"} {
         Releases
     }
