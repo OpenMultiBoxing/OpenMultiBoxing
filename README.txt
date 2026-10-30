@@ -1,4 +1,4 @@
-OpenMultiboxing by MooreaTV <moorea@ymail.com> (c) 2020-2023 All rights reserved
+OpenMultiboxing by MooreaTV <moorea@ymail.com> (c) 2020-2026 All rights reserved
 Open Source Software licensed under GPLv3 - No Warranty
 (contact the author if you need a different license)
 
