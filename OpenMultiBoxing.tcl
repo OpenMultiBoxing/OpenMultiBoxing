@@ -1315,7 +1315,8 @@ proc MenuSetup {} {
     $m3 add checkbutton -label "Key broadcast: send modifiers only with a key" -variable settings(rrDeferModifiers)
     $m3 add separator
     $m3 add checkbutton -label "Mouse broadcast: message mode" -variable settings(mouseBroadcastUsePostMessage)
-    $m3 add checkbutton -label "Mouse broadcast: remote track movement" -variable settings(mouseBroadcastNetTrack)
+    # to remote OMBs and to the windows stacked under main in the mirrored layout
+    $m3 add checkbutton -label "Mouse broadcast: track movement" -variable settings(mouseBroadcastNetTrack)
     $m3 add separator
     $m3 add checkbutton -label "Pause when mouse is outside windows" -variable settings(mouseOutsideWindowsPauses)
     $m3 add checkbutton -label "Focus back when mouse in game window" -variable settings(mouseInsideGameWindowFocuses)
@@ -1465,7 +1466,8 @@ proc ClickWindowRel {n xp yp button} {
         set WM_LBUTTONUP 0x0205
         set wParam 2
     }
-    set p $slot2position($n)
+    # where the window really is (under main in the mirrored layout)
+    set p [RealPosition $slot2position($n)]
     # scale
     lassign $settings($p,posXY) lx ly
     lassign $settings($p,size) lw lh
@@ -1482,13 +1484,36 @@ proc ClickWindowRel {n xp yp button} {
     }
     set w $slot2handle($n)
     after $settings(mouseBroadcastDelay)
-    if {$settings(mouseBroadcastUsePostMessage)} {
+    if {$p != $slot2position($n)} {
+        # under main in the mirrored layout: the cursor is over main, so it doesn't get the mouse move
+        # and a real click would go to main
+        set WM_MOUSEMOVE 0x0200
+        twapi::PostMessage $w $WM_MOUSEMOVE 0 $lword
+        twapi::PostMessage $w $WM_LBUTTONDOWN $wParam $lword
+        twapi::PostMessage $w $WM_LBUTTONUP 0 $lword
+    } elseif {$settings(mouseBroadcastUsePostMessage)} {
         twapi::PostMessage $w $WM_LBUTTONDOWN $wParam $lword
         twapi::PostMessage $w $WM_LBUTTONUP 0 $lword
     } else {
         twapi::click_mouse_button $button
     }
     after $settings(mouseBroadcastDelay)
+}
+
+# Mirrored layout: mouse moves over window n (main) also go to the windows stacked under it
+proc MirroredMouseMove {n xp yp} {
+    global settings slot2handle slot2position
+    set WM_MOUSEMOVE 0x0200
+    lassign $settings(1,size) lw lh
+    set lword [expr {(round($yp*$lh)<<16)+round($xp*$lw)}]
+    set skip [RRExcludedWindows]
+    foreach {i wh} [array get slot2handle] {
+        if {$i==$n || $i in $skip || ![info exists slot2position($i)]
+                || [RealPosition $slot2position($i)] == $slot2position($i)} {
+            continue
+        }
+        catch {twapi::PostMessage $wh $WM_MOUSEMOVE 0 $lword}
+    }
 }
 
 proc AbsoluteMouseCoordsToRelative {n mouseCoords} {
@@ -1534,7 +1559,7 @@ proc MouseBroadcastCheck {} {
         # slot can be gone while its window is closing
         if {$wType>=3 && [info exists slot2position([expr {$wType-2}])]} {
             set n [expr {$wType-2}]
-            set p $slot2position($n)
+            set p [RealPosition $slot2position($n)]
             # scale
             lassign $settings($p,posXY) lx ly
             lassign $settings($p,size) lw lh
@@ -1542,6 +1567,9 @@ proc MouseBroadcastCheck {} {
             set yp [expr {1.0*($y-$ly)/$lh}]
             Debug "Move on $n in position $p is rel x $xp rel y $yp"
             SendToClients "MOUSE $xp $yp\n"
+            if {[LayoutMirrored]} {
+                MirroredMouseMove $n $xp $yp
+            }
         }
     }
     set stateL [twapi::GetAsyncKeyState $VK_LBUTTON]
@@ -1591,7 +1619,7 @@ proc MouseBroadcastCheck {} {
         if {![info exists slot2position($n)]} {
             return
         }
-        set p $slot2position($n)
+        set p [RealPosition $slot2position($n)]
         # scale
         lassign $settings($p,posXY) lx ly
         lassign $settings($p,size) lw lh
@@ -2538,6 +2566,10 @@ proc FocusNinternal {n fg} {
             Foreground $wh
         }
     }
+    if {$p != 1 && [LayoutMirrored]} {
+        # keys go to that window but main stays visible (on top of it)
+        LowerUnderMain $wh
+    }
     if {$settings(showOverlay)} {
         windowIndicatorN $lastFocusWindow configure -foreground white
         if {[winfo exists .o$p]} {
@@ -2625,14 +2657,19 @@ proc UpdateN {n} {
     # local/temp only
     set wh $slot2handle($n)
     set p $slot2position($n)
-    lassign $settings($p,posXY) lx ly
-    lassign $settings($p,size) lw lh
+    set rp [RealPosition $p]
+    lassign $settings($rp,posXY) lx ly
+    lassign $settings($rp,size) lw lh
     set lstayOnTop 0
-    if {[info exists settings($p,stayOnTop)]} {
+    # in the mirrored layout, stay on top applies to the mirrors of the windows under main
+    if {$rp == $p && [info exists settings($p,stayOnTop)]} {
         set lstayOnTop $settings($p,stayOnTop)
     }
-    Debug "Update for $n in pos $p : $lx,$ly ${lw}x$lh - $lstayOnTop"
+    Debug "Update for $n in pos $p ($rp) : $lx,$ly ${lw}x$lh - $lstayOnTop"
     set raised [Update $wh $lx $ly $lw $lh $lstayOnTop]
+    if {$p == 1 && [LayoutMirrored]} {
+        RaiseMain
+    }
     if {$settings(showOverlay) && [winfo exists .o$p]} {
         .o$p.l configure -text $n
         if {$p!=1 && $settings(overlayClickable)} {
@@ -2900,11 +2937,20 @@ proc Capture {} {
 }
 
 proc PostCapture {w wname} {
-    global nextWindow stayOnTop lastUpdate
+    global nextWindow stayOnTop lastUpdate settings
     # Need to really update if we captured/forgot before
     catch {unset lastUpdate($w)}
-    Update $w [GetX] [GetY] [GetWidth] [GetHeight] $stayOnTop
+    if {[RealPosition $nextWindow] != $nextWindow && [ValidWindowSettingsN 1]} {
+        # mirrored layout: under the main window
+        Update $w {*}$settings(1,posXY) {*}$settings(1,size) 0
+    } else {
+        Update $w [GetX] [GetY] [GetWidth] [GetHeight] $stayOnTop
+    }
     updateListBox $nextWindow $w $wname
+    if {[LayoutMirrored]} {
+        LowerUnderMain $w
+        MirrorsRefreshAll
+    }
 }
 
 proc RegisterPerWindowHotkey {n wname} {
@@ -3056,8 +3102,11 @@ proc ChangeNumWindow {v} {
 }
 
 proc WindowLayout {} {
-    global settings monitorInfo scale skipMonitorText layoutinfo layoutNumWindowsText scaleText snapMenuText numWindowsFloat
+    global settings monitorInfo scale skipMonitorText layoutinfo layoutNumWindowsText scaleText snapMenuText numWindowsFloat \
+        layoutMirrored
     set tw .layout
+    # applied by Save and Apply
+    set layoutMirrored $settings(layoutMirrored)
     if {[winfo exists $tw]} {
         wm state $tw normal
         raise $tw
@@ -3076,12 +3125,14 @@ proc WindowLayout {} {
     tooltip $tw.s "Select how many windows in your layout."
     ttk::checkbutton $tw.cb1 -variable settings(layoutOneSize) -text "Same size for all" -command ChangeLayout
     ttk::checkbutton $tw.cb2 -variable settings(layoutOneRowCol) -text "One row/col for small windows" -command ChangeLayout
-    ttk::checkbutton $tw.cb3 -variable settings(layoutStacked) -text "All Stacked" -command ChangeLayout
+    ttk::checkbutton $tw.cb3 -variable settings(layoutStacked) -text "All Stacked" -command LayoutStackedChanged
+    ttk::checkbutton $tw.cb4 -variable layoutMirrored -text "Mirrored" -command LayoutMirroredChanged
     tooltip $tw.cb1 "Check or uncheck to redo the layout with\nwindows of the same size (fastest switch later)\nor not (1 big main window and smaller minions windows)"
+    tooltip $tw.cb4 "All the game windows stacked under the main one,\nthe other positions show live mirrors of them:\nswaps are instant (no resizing). Click a mirror to make it main.\nFocus follows mouse only works for the main window.\nApplied by Save and Apply."
     set layoutNumWindowsText "Layout for 99 windows"
     set width [expr {2+[string length $layoutNumWindowsText]}]
     UpdateLayoutNumWindows
-    grid x x x x $tw.cb2 - x -padx 8 -sticky we
+    grid x x x $tw.cb2 - $tw.cb4 -padx 8 -sticky we
     grid $tw.cbA -column 0 -row 0 -sticky {}
     grid [ttk::label $tw.l1 -textvariable layoutNumWindowsText -width $width -anchor c -justify center] $tw.s - $tw.cb1  $tw.cbT $tw.cb3 -sticky we -padx 8
     tooltip $tw.l1 "After automatic layout,\ndrag any window to adjust as necessary,\nuse arrow keys for fine pixel adjustment.\nClick on text to toggle stay on top... etc..."
@@ -3136,6 +3187,29 @@ proc WindowLayout {} {
         grid columnconfigure $tw $i -weight 1
     }
     SetUpMonitors
+}
+
+proc LayoutStackedChanged {} {
+    global settings layoutMirrored
+    if {$settings(layoutStacked)} {
+        set layoutMirrored 0
+    }
+    ChangeLayout
+}
+
+proc LayoutMirroredChanged {} {
+    global settings layoutMirrored
+    if {!$layoutMirrored} {
+        return
+    }
+    if {![MirrorCheckBinary]} {
+        set layoutMirrored 0
+        return
+    }
+    if {$settings(layoutStacked)} {
+        set settings(layoutStacked) 0
+        ChangeLayout
+    }
 }
 
 proc AddRemoveExcluded {i} {
@@ -4453,8 +4527,9 @@ proc ResetAll {} {
 }
 
 proc SaveLayout {} {
-    global settings slot2position scale sot
+    global settings slot2position slot2handle scale sot layoutMirrored
     set c .layout.c
+    set settings(layoutMirrored) $layoutMirrored
     for {set i 1} {$i<=$settings(numWindows)} {incr i} {
         set coords [SizeOfWindow "wow$i"]
         if {$coords == ""} {
@@ -4470,6 +4545,15 @@ proc SaveLayout {} {
         CheckWindow [list UpdateN $i] $i
         Debug "Sot for $i is $settings($i,stayOnTop) $sot($i)"
     }
+    if {[LayoutMirrored]} {
+        # moving windows under main doesn't change their stacking order
+        foreach {n wh} [array get slot2handle] {
+            LowerUnderMain $wh
+        }
+        RaiseMain
+    }
+    # mirrors of the new layout positions, or none
+    MirrorsRefreshAll
     SaveSettings
     Overlay
     updateIndex
@@ -5035,9 +5119,12 @@ if {![info exists mirrorEdit]} {
 
 # Returns 1 if the binary has cffi (needed to call the DWM functions)
 proc MirrorInit {} {
-    global env
+    global env mirrorNoSupport
     if {[info commands ::DwmRegisterThumbnail] ne ""} {
         return 1
+    }
+    if {[info exists mirrorNoSupport]} {
+        return 0
     }
     if {[catch {
         package require cffi
@@ -5057,6 +5144,7 @@ proc MirrorInit {} {
         ::ombDwmapi stdcall DwmRegisterThumbnail long {dest ulonglong src ulonglong thumb {ulonglong out}}
     } err]} {
         Debug "No mirror support: $err"
+        set mirrorNoSupport 1
         return 0
     }
     return 1
@@ -5080,28 +5168,68 @@ proc MirrorCheckBinary {} {
     return 0
 }
 
-# Window number for a mirror source
-proc MirrorSourceSlot {source} {
+# Window number currently in layout position p, "" if none
+proc SlotAtPosition {p} {
     global slot2position
-    if {$source ne "main"} {
-        return $source
-    }
-    foreach {n p} [array get slot2position] {
-        if {$p == 1} {
+    foreach {n np} [array get slot2position] {
+        if {$np == $p} {
             return $n
         }
     }
-    return 1
+    return ""
+}
+
+# Window number for a mirror source
+proc MirrorSourceSlot {source} {
+    if {$source ne "main"} {
+        return $source
+    }
+    set n [SlotAtPosition 1]
+    if {$n eq ""} {
+        return 1
+    }
+    return $n
+}
+
+# Mirrored layout: all the game windows stacked at the main position, the other positions
+# show mirrors of them (swaps don't resize the windows)
+proc LayoutMirrored {} {
+    global settings
+    expr {$settings(layoutMirrored) && !$settings(layoutStacked) && [MirrorInit]}
+}
+
+# Layout position whose geometry the window in position p actually has
+proc RealPosition {p} {
+    if {$p != 1 && [LayoutMirrored]} {
+        return 1
+    }
+    return $p
 }
 
 # Client size of window n: the layout size we give it (borderless, as for mouse broadcast scaling),
 # rather than its current size which lags as windows are resized asynchronously
 proc MirrorSourceSize {n} {
     global settings slot2position slot2handle
-    if {[info exists slot2position($n)] && [info exists settings($slot2position($n),size)]} {
-        return $settings($slot2position($n),size)
+    if {[info exists slot2position($n)]} {
+        set p [RealPosition $slot2position($n)]
+        if {[info exists settings($p,size)]} {
+            return $settings($p,size)
+        }
     }
     twapi::get_window_client_area_size $slot2handle($n)
+}
+
+# {left top right bottom} of the biggest cw x ch aspect ratio area centered in w x h
+proc MirrorFit {cw ch w h} {
+    if {$w*$ch > $h*$cw} {
+        # wider: bars on the sides
+        set fw [expr {round(1.0*$h*$cw/$ch)}]
+        set l [expr {($w-$fw)/2}]
+        return [list $l 0 [expr {$l+$fw}] $h]
+    }
+    set fh [expr {round(1.0*$w*$ch/$cw)}]
+    set t [expr {($h-$fh)/2}]
+    list 0 $t $w [expr {$t+$fh}]
 }
 
 # {left top right bottom} in client pixels of an area given as fractions
@@ -5190,7 +5318,7 @@ proc MirrorCreate {i} {
 
 # (Re)attach the mirror to its source window and update its areas
 proc MirrorRefresh {i} {
-    global settings slot2handle mirrorThumb mirrorSrc mirrorEdit mirrorLast
+    global settings slot2handle mirrorEdit
     set t .mirror$i
     if {![winfo exists $t]} {
         return
@@ -5213,38 +5341,156 @@ proc MirrorRefresh {i} {
         update idletasks
         MirrorClickThrough $t [expr {!$mirrorEdit}]
     }
-    set src [HwndInt $wh]
-    if {![info exists mirrorSrc($i)] || $mirrorSrc($i) != $src} {
-        MirrorDetach $i
-        set hr [DwmRegisterThumbnail [expr {[wm frame $t]}] $src thumb]
-        if {$hr != 0} {
-            Debug "Mirror $i DwmRegisterThumbnail error $hr"
-            return
-        }
-        set mirrorThumb($i) $thumb
-        set mirrorSrc($i) $src
-        Debug "Mirror $i now showing OMB $n"
-    }
     lassign [dict get $m geom] x y w h
     lassign [MirrorSourceRect [dict get $m area] $cw $ch] l tp r bt
     lassign {0 0 0 0} kx ky bx by
     if {$mirrorEdit} {
         lassign [MirrorEditInset [expr {$r-$l}] [expr {$bt-$tp}] $w $h] kx ky bx by
     }
+    MirrorThumbnail $i $t $n \
+        [list [expr {$l+$kx}] [expr {$tp+$ky}] [expr {$r-$kx}] [expr {$bt-$ky}]] \
+        [list $bx $by [expr {$w-$bx}] [expr {$h-$by}]]
+}
+
+# Shows the src {left top right bottom} client area of window n in the dst area of toplevel t,
+# for mirror i (an index in settings(mirrors), or L<position> for the mirrored layout ones)
+proc MirrorThumbnail {i t n src dst} {
+    global slot2handle mirrorThumb mirrorSrc mirrorLast
+    set hwnd [HwndInt $slot2handle($n)]
+    if {![info exists mirrorSrc($i)] || $mirrorSrc($i) != $hwnd} {
+        MirrorDetach $i
+        set hr [DwmRegisterThumbnail [expr {[wm frame $t]}] $hwnd thumb]
+        if {$hr != 0} {
+            Debug "Mirror $i DwmRegisterThumbnail error $hr"
+            return
+        }
+        set mirrorThumb($i) $thumb
+        set mirrorSrc($i) $hwnd
+        Debug "Mirror $i now showing OMB $n"
+    }
     # skip if unchanged
-    set key [list $w $h $bx $by $l $tp $r $bt]
+    set key [list $src $dst]
     if {[info exists mirrorLast($i)] && $mirrorLast($i) eq $key} {
         return
     }
     set mirrorLast($i) $key
+    lassign $src sl st sr sb
+    lassign $dst dl dt dr db
     set props [dict create dwFlags 0x1f \
-        rcDestination [dict create left $bx top $by right [expr {$w-$bx}] bottom [expr {$h-$by}]] \
-        rcSource [dict create left [expr {$l+$kx}] top [expr {$tp+$ky}] right [expr {$r-$kx}] bottom [expr {$bt-$ky}]] \
+        rcDestination [dict create left $dl top $dt right $dr bottom $db] \
+        rcSource [dict create left $sl top $st right $sr bottom $sb] \
         opacity 255 fVisible 1 fSourceClientAreaOnly 1]
     DwmUpdateThumbnailProperties $mirrorThumb($i) $props
 }
 
+# Mirrors of the windows stacked under the main one, in their layout positions (2 and up)
+proc LayoutMirrorsRefresh {} {
+    global settings slot2handle
+    set on [LayoutMirrored]
+    foreach t [winfo children .] {
+        if {[regexp {^\.lmirror(\d+)$} $t -> p] && (!$on || $p > $settings(numWindows))} {
+            MirrorDetach L$p
+            destroy $t
+        }
+    }
+    if {!$on} {
+        return
+    }
+    set created 0
+    for {set p 2} {$p <= $settings(numWindows)} {incr p} {
+        if {![ValidWindowSettingsN $p]} {
+            continue
+        }
+        set t .lmirror$p
+        lassign $settings($p,posXY) x y
+        lassign $settings($p,size) w h
+        set top 0
+        if {[info exists settings($p,stayOnTop)]} {
+            set top $settings($p,stayOnTop)
+        }
+        if {![winfo exists $t]} {
+            toplevel $t -background black -cursor hand2
+            wm overrideredirect $t 1
+            wm attributes $t -alpha 0.99
+            bind $t <ButtonPress-1> [list LayoutMirrorClick $p %x %y]
+            wm geometry $t ${w}x$h+$x+$y
+            update idletasks
+            MirrorClickThrough $t 0
+            set created 1
+        }
+        wm attributes $t -topmost $top
+        if {[wm geometry $t] ne "${w}x$h+$x+$y"} {
+            wm geometry $t ${w}x$h+$x+$y
+        }
+        set n [SlotAtPosition $p]
+        if {$n eq "" || ![info exists slot2handle($n)] || ![twapi::window_exists $slot2handle($n)]
+                || [catch {MirrorSourceSize $n} csize]} {
+            MirrorDetach L$p
+            wm withdraw $t
+            continue
+        }
+        if {[wm state $t] ne "normal"} {
+            wm deiconify $t
+            update idletasks
+            MirrorClickThrough $t 0
+        }
+        lassign $csize cw ch
+        MirrorThumbnail L$p $t $n [list 0 0 $cw $ch] [MirrorFit $cw $ch $w $h]
+    }
+    if {$created} {
+        UpdateHandles
+    }
+}
+
+# Clicking a mirror of the mirrored layout makes that window the main one, with the mouse
+# at the same place in it
+proc LayoutMirrorClick {p x y} {
+    global settings
+    set n [SlotAtPosition $p]
+    if {$n eq ""} {
+        return
+    }
+    SetAsMain $n
+    if {![ValidWindowSettingsN 1] || [catch {MirrorSourceSize $n} csize]} {
+        return
+    }
+    lassign $settings(1,posXY) mx my
+    lassign [MirrorToSource $x $y {*}$settings($p,size) {*}$csize] sx sy
+    twapi::move_mouse [expr {$mx+$sx}] [expr {$my+$sy}]
+}
+
+# Source client coordinates of x,y in a w x h mirror of a whole cw x ch window (letterboxed)
+proc MirrorToSource {x y w h cw ch} {
+    lassign [MirrorFit $cw $ch $w $h] l t r b
+    set fx [expr {min(1.0, max(0.0, 1.0*($x-$l)/($r-$l)))}]
+    set fy [expr {min(1.0, max(0.0, 1.0*($y-$t)/($b-$t)))}]
+    list [expr {min($cw-1, round($fx*$cw))}] [expr {min($ch-1, round($fy*$ch))}]
+}
+
+# In the mirrored layout, the main window goes on top of the ones stacked under it
+proc RaiseMain {} {
+    global slot2handle
+    set n [SlotAtPosition 1]
+    if {$n eq "" || ![info exists slot2handle($n)]} {
+        return
+    }
+    # HWND_TOP, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE|SWP_NOOWNERZORDER|SWP_NOSENDCHANGING|SWP_ASYNCWINDOWPOS
+    twapi::SetWindowPos $slot2handle($n) 0 0 0 0 0 0x4613
+}
+
+# Puts game window wh just under the main one (always allowed, unlike raising main above
+# another process' foreground window)
+proc LowerUnderMain {wh} {
+    global slot2handle
+    set n [SlotAtPosition 1]
+    if {$n eq "" || ![info exists slot2handle($n)] || $slot2handle($n) eq $wh} {
+        return
+    }
+    twapi::SetWindowPos $wh $slot2handle($n) 0 0 0 0 0x4613
+}
+
 proc MirrorsRefreshAll {} {
+    LayoutMirrorsRefresh
     if {[info commands ::DwmRegisterThumbnail] eq ""} {
         return
     }
@@ -5711,6 +5957,7 @@ array set settings {
     layoutOneSize 1
     layoutOneRowCol 0
     layoutStacked 0
+    layoutMirrored 0
     layoutScale "1/6"
     layoutSnap 4
     layoutMaxWindows 32
@@ -5764,6 +6011,7 @@ array set settings {
     mouseBroadcastDelay 30
     mouseHoldCancel 500
     mouseBroadcastUsePostMessage 1
+    mouseBroadcastNetTrack 1
     rrDeferModifiers 1
     broadcastDelay 0
     broadcastDelayModifiersFlush 0

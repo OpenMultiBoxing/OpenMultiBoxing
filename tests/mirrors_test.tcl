@@ -59,6 +59,28 @@ Check "inset tiny" [MirrorEditInset 4 4 4 4] {0 0 0 0}
 
 # source size is the layout size of the slot's position
 array set slot2position {1 3 2 2 3 1}
-array set settings {1,size {1008 654} 3,size {336 218}}
+array set settings {1,size {1008 654} 3,size {336 218} layoutMirrored 0 layoutStacked 0}
 Check "main size" [MirrorSourceSize 3] {1008 654}
 Check "small size" [MirrorSourceSize 1] {336 218}
+
+Check "slot at position" [SlotAtPosition 3] 1
+Check "no slot at position" [SlotAtPosition 4] ""
+Check "real position" [RealPosition 3] 3
+
+# mirrored layout: all windows really are at the main position
+proc MirrorInit {} {return 1}
+set settings(layoutMirrored) 1
+Check "mirrored real position" [RealPosition 3] 1
+Check "mirrored main position" [RealPosition 1] 1
+Check "mirrored small size" [MirrorSourceSize 1] {1008 654}
+set settings(layoutStacked) 1
+Check "stacked wins" [RealPosition 3] 3
+set settings(layoutStacked) 0
+
+Check "fit same ratio" [MirrorFit 1600 900 320 180] {0 0 320 180}
+Check "fit wider spot" [MirrorFit 1600 900 400 180] {40 0 360 180}
+Check "fit taller spot" [MirrorFit 1600 900 320 240] {0 30 320 210}
+
+Check "to source middle" [MirrorToSource 160 90 320 180 1600 900] {800 450}
+Check "to source letterboxed" [MirrorToSource 40 90 400 180 1600 900] {0 450}
+Check "to source in the bar" [MirrorToSource 5 300 400 180 1600 900] {0 899}
