@@ -5062,13 +5062,16 @@ proc MirrorInit {} {
     return 1
 }
 
+# Old binaries (before v10) can run this script after an update but lack cffi
 proc MirrorCheckBinary {} {
-    global vers
     if {[MirrorInit]} {
         return 1
     }
-    OmbError "Outdated binary for Mirrors"\
-        "To use mirrors, you must download a more recent\nOMB .exe: get and extract OpenMultiboxing-${vers}.zip\n\nVisit https://OpenMultiBoxing.org click \"Get the Software\""
+    set ans [OmbMessage -type yesno -icon warning -title "Outdated binary for Mirrors" \
+        -message "Mirrors need the OpenMultiBoxing v10.0.0 or newer .exe (your .exe is older and lacks the needed component, only the script got updated).\n\nDownload and extract the latest OpenMultiBoxing zip (Help menu: Get the newest binary release).\n\nOpen the download page now?"]
+    if {$ans eq "yes"} {
+        Releases
+    }
     return 0
 }
 
@@ -5086,10 +5089,31 @@ proc MirrorSourceSlot {source} {
     return 1
 }
 
+# Client size of window n: the layout size we give it (borderless, as for mouse broadcast scaling),
+# rather than its current size which lags as windows are resized asynchronously
+proc MirrorSourceSize {n} {
+    global settings slot2position slot2handle
+    if {[info exists slot2position($n)] && [info exists settings($slot2position($n),size)]} {
+        return $settings($slot2position($n),size)
+    }
+    twapi::get_window_client_area_size $slot2handle($n)
+}
+
 # {left top right bottom} in client pixels of an area given as fractions
 proc MirrorSourceRect {area cw ch} {
     lassign $area fx fy fw fh
     list [expr {round($fx*$cw)}] [expr {round($fy*$ch)}] [expr {round(($fx+$fw)*$cw)}] [expr {round(($fy+$fh)*$ch)}]
+}
+
+# Edit mode border of about 2 pixels: crops kx/ky source pixels and the matching bx/by mirror pixels
+# on each side so the zoom and the content position don't change. {kx ky bx by}
+proc MirrorEditInset {sw sh w h} {
+    set kx [expr {int(ceil(2.0*$sw/$w))}]
+    set ky [expr {int(ceil(2.0*$sh/$h))}]
+    if {2*$kx >= $sw || 2*$ky >= $sh} {
+        return {0 0 0 0}
+    }
+    list $kx $ky [expr {round(1.0*$kx*$w/$sw)}] [expr {round(1.0*$ky*$h/$sh)}]
 }
 
 proc HwndInt {wh} {
@@ -5111,12 +5135,12 @@ proc MirrorSaveSoon {} {
 set mirrorSaveId ""
 
 proc MirrorDetach {i} {
-    global mirrorThumb mirrorSrc
+    global mirrorThumb mirrorSrc mirrorLast
     if {[info exists mirrorThumb($i)]} {
         catch {DwmUnregisterThumbnail $mirrorThumb($i)}
         unset mirrorThumb($i)
     }
-    unset -nocomplain mirrorSrc($i)
+    unset -nocomplain mirrorSrc($i) mirrorLast($i)
 }
 
 proc MirrorHide {i} {
@@ -5148,6 +5172,7 @@ proc MirrorCreate {i} {
         wm attributes $t -alpha 0.99
         bind $t <ButtonPress-1> [list MirrorDragStart $i %X %Y]
         bind $t <B1-Motion> [list MirrorDrag $i %X %Y]
+        bind $t <Motion> [list MirrorCursor $i %x %y]
         bind $t <ButtonRelease-1> [list MirrorDragEnd $i]
         bind $t <MouseWheel> [list MirrorZoom $i %D]
         bind $t <ButtonPress-3> [list MirrorMenu $i %X %Y]
@@ -5160,7 +5185,7 @@ proc MirrorCreate {i} {
 
 # (Re)attach the mirror to its source window and update its areas
 proc MirrorRefresh {i} {
-    global settings slot2handle mirrorThumb mirrorSrc mirrorEdit
+    global settings slot2handle mirrorThumb mirrorSrc mirrorEdit mirrorLast
     set t .mirror$i
     if {![winfo exists $t]} {
         return
@@ -5172,8 +5197,8 @@ proc MirrorRefresh {i} {
         return
     }
     set wh $slot2handle($n)
-    if {[catch {twapi::get_window_client_area_size $wh} csize]} {
-        Debug "Mirror $i source $n gone: $csize"
+    if {![twapi::window_exists $wh] || [catch {MirrorSourceSize $n} csize]} {
+        Debug "Mirror $i source $n gone"
         MirrorHide $i
         return
     }
@@ -5196,11 +5221,20 @@ proc MirrorRefresh {i} {
         Debug "Mirror $i now showing OMB $n"
     }
     lassign [dict get $m geom] x y w h
-    set b [expr {$mirrorEdit ? 2 : 0}]
     lassign [MirrorSourceRect [dict get $m area] $cw $ch] l tp r bt
+    lassign {0 0 0 0} kx ky bx by
+    if {$mirrorEdit} {
+        lassign [MirrorEditInset [expr {$r-$l}] [expr {$bt-$tp}] $w $h] kx ky bx by
+    }
+    # skip if unchanged
+    set key [list $w $h $bx $by $l $tp $r $bt]
+    if {[info exists mirrorLast($i)] && $mirrorLast($i) eq $key} {
+        return
+    }
+    set mirrorLast($i) $key
     set props [dict create dwFlags 0x1f \
-        rcDestination [dict create left $b top $b right [expr {$w-$b}] bottom [expr {$h-$b}]] \
-        rcSource [dict create left $l top $tp right $r bottom $bt] \
+        rcDestination [dict create left $bx top $by right [expr {$w-$bx}] bottom [expr {$h-$by}]] \
+        rcSource [dict create left [expr {$l+$kx}] top [expr {$tp+$ky}] right [expr {$r-$kx}] bottom [expr {$bt-$ky}]] \
         opacity 255 fVisible 1 fSourceClientAreaOnly 1]
     DwmUpdateThumbnailProperties $mirrorThumb($i) $props
 }
@@ -5260,23 +5294,164 @@ proc MirrorsToggle {} {
     MirrorsRefreshAll
 }
 
-proc MirrorDragStart {i x y} {
+# Sides (some of l r t b) of a w x h mirror near local x,y
+proc MirrorEdges {x y w h} {
+    set e [expr {min(8, $w/4, $h/4)}]
+    set edges ""
+    if {$x < $e} {
+        append edges l
+    } elseif {$x >= $w-$e} {
+        append edges r
+    }
+    if {$y < $e} {
+        append edges t
+    } elseif {$y >= $h-$e} {
+        append edges b
+    }
+    return $edges
+}
+
+proc MirrorCursor {i x y} {
     global mirrorDrag
-    set mirrorDrag [list $x $y [winfo rootx .mirror$i] [winfo rooty .mirror$i]]
+    if {$mirrorDrag ne ""} {
+        return
+    }
+    set t .mirror$i
+    switch [MirrorEdges $x $y [winfo width $t] [winfo height $t]] {
+        l - r {set c size_we}
+        t - b {set c size_ns}
+        lt - rb {set c size_nw_se}
+        rt - lb {set c size_ne_sw}
+        default {set c fleur}
+    }
+    $t configure -cursor $c
+}
+
+# Moving dx,dy screen pixels the edges of a mirror: same zoom, the source area grows or shrinks
+# by whole source pixels (no zoom wobble), within the cw x ch source window. Returns the new {geom area}
+proc MirrorEdgeDrag {edges geom area cw ch dx dy} {
+    lassign $geom x y w h
+    lassign $area fx fy fw fh
+    # mirror pixels per source pixel
+    set zx [expr {$w/($fw*$cw)}]
+    set zy [expr {$h/($fh*$ch)}]
+    # in source pixels
+    set dx [expr {round($dx/$zx)}]
+    set dy [expr {round($dy/$zy)}]
+    set minx [expr {int(ceil(16/$zx))}]
+    set miny [expr {int(ceil(16/$zy))}]
+    set sw [expr {round($fw*$cw)}]
+    set sh [expr {round($fh*$ch)}]
+    if {[string match *l* $edges]} {
+        set dx [expr {max(-round($fx*$cw), min($dx, $sw-$minx))}]
+        set fx [expr {$fx+1.0*$dx/$cw}]
+        set fw [expr {$fw-1.0*$dx/$cw}]
+        set x [expr {$x+$dx*$zx}]
+    } elseif {[string match *r* $edges]} {
+        set dx [expr {min(round((1-$fx-$fw)*$cw), max($dx, $minx-$sw))}]
+        set fw [expr {$fw+1.0*$dx/$cw}]
+    }
+    if {[string match *t* $edges]} {
+        set dy [expr {max(-round($fy*$ch), min($dy, $sh-$miny))}]
+        set fy [expr {$fy+1.0*$dy/$ch}]
+        set fh [expr {$fh-1.0*$dy/$ch}]
+        set y [expr {$y+$dy*$zy}]
+    } elseif {[string match *b* $edges]} {
+        set dy [expr {min(round((1-$fy-$fh)*$ch), max($dy, $miny-$sh))}]
+        set fh [expr {$fh+1.0*$dy/$ch}]
+    }
+    set w [expr {$fw*$cw*$zx}]
+    set h [expr {$fh*$ch*$zy}]
+    list [list [expr {round($x)}] [expr {round($y)}] [expr {round($w)}] [expr {round($h)}]] [list $fx $fy $fw $fh]
+}
+
+# Source area of mirror i in pixels {w h} (error if the source is gone)
+proc MirrorSourcePixels {i} {
+    global settings
+    set m [lindex $settings(mirrors) $i]
+    lassign [MirrorSourceRect [dict get $m area] {*}[MirrorSourceSize [MirrorSourceSlot [dict get $m source]]]] l t r b
+    list [expr {$r-$l}] [expr {$b-$t}]
+}
+
+# Current zoom of mirror i, relative to the source window at its current size
+proc MirrorZoomOf {i} {
+    global settings
+    lassign [MirrorSourcePixels $i] sw
+    lassign [dict get [lindex $settings(mirrors) $i] geom] x y w
+    expr {1.0*$w/$sw}
+}
+
+# Next (dir>0) or previous round zoom from z, for the edit mode mouse wheel only (mirrors can have any zoom)
+proc MirrorNextZoom {z dir} {
+    set mirrorZooms [list 0.1 0.2 0.25 [expr {1/3.}] 0.5 [expr {2/3.}] 0.75 1 1.25 1.5 1.75 2 2.5 3 3.5 4 5 6 8]
+    if {$dir > 0} {
+        foreach s $mirrorZooms {
+            if {$s > $z*1.01} {
+                return $s
+            }
+        }
+        return [lindex $mirrorZooms end]
+    }
+    foreach s [lreverse $mirrorZooms] {
+        if {$s < $z/1.01} {
+            return $s
+        }
+    }
+    return [lindex $mirrorZooms 0]
+}
+
+proc MirrorSetZoom {i z} {
+    if {[catch {MirrorSourcePixels $i} spx]} {
+        return
+    }
+    lassign $spx sw sh
+    MirrorResize $i [expr {max(16, round($sw*$z))}] [expr {max(16, round($sh*$z))}]
+}
+
+# Drag from the middle moves the mirror, from a side changes the area
+proc MirrorDragStart {i x y} {
+    global mirrorDrag settings
+    set t .mirror$i
+    set m [lindex $settings(mirrors) $i]
+    set edges [MirrorEdges [expr {$x-[winfo rootx $t]}] [expr {$y-[winfo rooty $t]}] [winfo width $t] [winfo height $t]]
+    set csize {0 0}
+    if {$edges ne "" && [catch {MirrorSourceSize [MirrorSourceSlot [dict get $m source]]} csize]} {
+        set edges ""
+    }
+    set mirrorDrag [list $x $y [winfo rootx $t] [winfo rooty $t] $edges [dict get $m geom] [dict get $m area] {*}$csize]
 }
 
 proc MirrorDrag {i x y} {
     global mirrorDrag
-    lassign $mirrorDrag mx my wx wy
-    wm geometry .mirror$i +[expr {$wx+$x-$mx}]+[expr {$wy+$y-$my}]
+    if {$mirrorDrag eq ""} {
+        return
+    }
+    lassign $mirrorDrag mx my wx wy edges geom area cw ch
+    if {$edges eq ""} {
+        wm geometry .mirror$i +[expr {$wx+$x-$mx}]+[expr {$wy+$y-$my}]
+        return
+    }
+    lassign [MirrorEdgeDrag $edges $geom $area $cw $ch [expr {$x-$mx}] [expr {$y-$my}]] ngeom narea
+    MirrorSet $i geom $ngeom
+    MirrorSet $i area $narea
+    lassign $ngeom nx ny nw nh
+    wm geometry .mirror$i ${nw}x$nh+$nx+$ny
+    MirrorRefresh $i
 }
 
 proc MirrorDragEnd {i} {
-    global settings
-    lassign [dict get [lindex $settings(mirrors) $i] geom] x y w h
-    MirrorSet $i geom [list [winfo rootx .mirror$i] [winfo rooty .mirror$i] $w $h]
+    global settings mirrorDrag
+    if {$mirrorDrag eq ""} {
+        return
+    }
+    if {[lindex $mirrorDrag 4] eq ""} {
+        lassign [dict get [lindex $settings(mirrors) $i] geom] x y w h
+        MirrorSet $i geom [list [winfo rootx .mirror$i] [winfo rooty .mirror$i] $w $h]
+    }
+    set mirrorDrag ""
     MirrorSaveSoon
 }
+set mirrorDrag ""
 
 proc MirrorResize {i w h} {
     global settings
@@ -5287,24 +5462,12 @@ proc MirrorResize {i w h} {
     MirrorSaveSoon
 }
 
-# Mouse wheel zoom, keeping the aspect ratio
+# Mouse wheel zoom, to the next/previous round zoom
 proc MirrorZoom {i delta} {
-    global settings
-    lassign [dict get [lindex $settings(mirrors) $i] geom] x y w h
-    set nw [expr {max(16, round($w * ($delta > 0 ? 1.1 : 1/1.1)))}]
-    MirrorResize $i $nw [expr {max(16, round(1.0*$h*$nw/$w))}]
-}
-
-# Same size as the source area
-proc MirrorActualSize {i} {
-    global settings slot2handle
-    set m [lindex $settings(mirrors) $i]
-    set n [MirrorSourceSlot [dict get $m source]]
-    if {[catch {twapi::get_window_client_area_size $slot2handle($n)} csize]} {
+    if {[catch {MirrorZoomOf $i} z]} {
         return
     }
-    lassign [MirrorSourceRect [dict get $m area] {*}$csize] l t r b
-    MirrorResize $i [expr {$r-$l}] [expr {$b-$t}]
+    MirrorSetZoom $i [MirrorNextZoom $z $delta]
 }
 
 proc MirrorMenu {i x y} {
@@ -5316,7 +5479,16 @@ proc MirrorMenu {i x y} {
     set mirrorMenuSource [dict get $m source]
     set mirrorMenuTop [dict get $m top]
     $mn add command -label "Select area again..." -command [list MirrorSelect $i]
-    $mn add command -label "Actual size (1:1)" -command [list MirrorActualSize $i]
+    set label Zoom
+    if {![catch {MirrorZoomOf $i} z]} {
+        # relative to the source as it currently is (smaller when in a small layout position)
+        set label [format "Zoom (now %.2fx of OMB %s)" $z [MirrorSourceSlot $mirrorMenuSource]]
+    }
+    menu $mn.zoom -tearoff 0
+    foreach z {0.5 1 1.5 2 3 4} {
+        $mn.zoom add command -label "${z}x" -command [list MirrorSetZoom $i $z]
+    }
+    $mn add cascade -label $label -menu $mn.zoom
     $mn add checkbutton -label "Stay on top" -variable mirrorMenuTop -command [list MirrorChangeTop $i]
     $mn add separator
     $mn add radiobutton -label "Source: main window" -value main -variable mirrorMenuSource -command [list MirrorChangeSource $i]
@@ -5350,40 +5522,86 @@ proc MirrorDelete {i} {
     SaveSettings
 }
 
-# Transparent overlay on the source window to drag the area to mirror. i is the mirror to change,
-# empty to add a new one (of the main window)
-proc MirrorSelect {i} {
-    global settings slot2handle mirrorSelect
-    if {![MirrorCheckBinary]} {
-        return
-    }
-    if {$i eq ""} {
-        set source main
-    } else {
-        set source [dict get [lindex $settings(mirrors) $i] source]
-    }
-    set n [MirrorSourceSlot $source]
-    if {![info exists slot2handle($n)]} {
-        OmbError "No window to mirror" "OMB $n isn't captured, there is nothing to mirror"
-        return
-    }
+# Semi transparent toplevel t over the client area of game window n, with a centered text.
+# Returns the client area {x y w h} on screen
+proc MirrorOverlay {t n cursor text} {
+    global slot2handle
     set wh $slot2handle($n)
     set pt [dict create x 0 y 0]
     ClientToScreen [HwndInt $wh] pt
     lassign [twapi::get_window_client_area_size $wh] cw ch
     set x [dict get $pt x]
     set y [dict get $pt y]
-    set mirrorSelect [list $i $source $x $y $cw $ch]
-    set t .mirrorSel
     destroy $t
-    toplevel $t -cursor crosshair
+    toplevel $t -cursor $cursor
     wm overrideredirect $t 1
     wm attributes $t -topmost 1 -alpha 0.4
     wm geometry $t ${cw}x$ch+$x+$y
     canvas $t.c -background gray20 -highlightthickness 0
     pack $t.c -fill both -expand 1
-    $t.c create text [expr {$cw/2}] [expr {$ch/2}] -fill white -font WOBBold -justify center \
-        -text "Drag a rectangle around the area of OMB $n to mirror\n(Escape to cancel)"
+    $t.c create text [expr {$cw/2}] [expr {$ch/2}] -fill white -font WOBBold -justify center -text $text
+    list $x $y $cw $ch
+}
+
+proc MirrorPickClose {} {
+    foreach t [winfo children .] {
+        if {[string match .mirrorPick* $t]} {
+            destroy $t
+        }
+    }
+}
+
+# Step 1 of adding a mirror: an overlay on each game window, click one to then select its area
+proc MirrorPick {} {
+    global slot2handle
+    if {![MirrorCheckBinary]} {
+        return
+    }
+    MirrorPickClose
+    set t ""
+    foreach n [array names slot2handle] {
+        set t .mirrorPick$n
+        if {[catch {MirrorOverlay $t $n hand2 "OMB $n\nClick to mirror an area of this window\n(Escape to cancel)"} err]} {
+            Debug "Mirror pick OMB $n: $err"
+            destroy $t
+            continue
+        }
+        bind $t.c <ButtonRelease-1> "MirrorPickClose; MirrorSelect {} $n"
+        bind $t <Escape> MirrorPickClose
+    }
+    update
+    if {[winfo exists $t]} {
+        focus -force $t.c
+    } else {
+        OmbError "No window to mirror" "No OMB window could be found, there is nothing to mirror"
+    }
+}
+
+# Transparent overlay on the source window to drag the area to mirror. i is the mirror to change,
+# empty to add a new one of window n
+proc MirrorSelect {i {n ""}} {
+    global settings slot2handle mirrorSelect
+    if {![MirrorCheckBinary]} {
+        return
+    }
+    if {$i eq ""} {
+        # new mirrors stay on the window they were taken from (right click to follow main instead)
+        set source $n
+    } else {
+        set source [dict get [lindex $settings(mirrors) $i] source]
+        set n [MirrorSourceSlot $source]
+    }
+    if {![info exists slot2handle($n)]} {
+        OmbError "No window to mirror" "OMB $n isn't captured, there is nothing to mirror"
+        return
+    }
+    set t .mirrorSel
+    if {[catch {MirrorOverlay $t $n crosshair "Drag a rectangle around the area of OMB $n to mirror\n(Escape to cancel)"} rect]} {
+        destroy $t
+        OmbError "No window to mirror" "OMB $n can't be found: $rect"
+        return
+    }
+    set mirrorSelect [list $i $source {*}$rect]
     bind $t.c <ButtonPress-1> {
         set mirrorSelStart [list %x %y]
         .mirrorSel.c delete sel
@@ -5437,11 +5655,14 @@ proc MirrorsDialog {} {
         wm resizable $tw 0 0
         wm protocol $tw WM_DELETE_WINDOW MirrorsDialogClose
         set help "Mirrors are live copies of an area of a game window, e.g. the minimap.\n"
+        append help "They show the window they were taken from, wherever it is\n"
+        append help "(or whichever window is main: right click, Source: main window).\n"
         append help "While this window is open (edit mode), drag mirrors to move them,\n"
+        append help "drag their sides to extend or shrink the mirrored area,\n"
         append help "use the mouse wheel to zoom and right click for options.\n"
         append help "Otherwise mirrors let mouse clicks through."
         grid [ttk::label $tw.l -justify left -text $help] -padx 8 -pady 6 -sticky w
-        grid [ttk::button $tw.add -text "Add a mirror of an area of the main window..." -command {MirrorSelect {}}] -padx 8 -pady 4 -sticky we
+        grid [ttk::button $tw.add -text "Add a mirror: click a window, then drag the area to mirror..." -command MirrorPick] -padx 8 -pady 4 -sticky we
         grid [ttk::checkbutton $tw.edit -text "Edit mode" -variable mirrorEdit -command {MirrorsEdit $mirrorEdit}] -padx 8 -sticky w
         grid [ttk::checkbutton $tw.shown -text "Show mirrors" -variable settings(mirrorsShown) -command "MirrorsRefreshAll; SaveSettings"] -padx 8 -sticky w
         grid [ttk::button $tw.close -text Close -command MirrorsDialogClose] -padx 8 -pady 6

@@ -19,3 +19,46 @@ set settings(mirrors) [list [dict create source main area {0 0 1 1} geom {1 2 3 
 MirrorSet 1 top 1
 Check "set top" [dict get [lindex $settings(mirrors) 1] top] 1
 Check "other unchanged" [dict get [lindex $settings(mirrors) 0] geom] {1 2 3 4}
+
+Check "edges middle" [MirrorEdges 50 50 100 100] ""
+Check "edges right" [MirrorEdges 95 50 100 100] r
+Check "edges top left" [MirrorEdges 2 3 100 100] lt
+Check "edges small" [MirrorEdges 6 10 20 20] ""
+
+# 2x zoom of a 100x50 area at 100,50 of a 1000x500 window
+set g {10 20 200 100}
+set a {0.1 0.1 0.1 0.1}
+proc Round4 {l} {lmap v $l {expr {round($v*10000)/10000.}}}
+lassign [MirrorEdgeDrag r $g $a 1000 500 20 0] ng na
+Check "drag right geom" $ng {10 20 220 100}
+Check "drag right area" [Round4 $na] {0.1 0.1 0.11 0.1}
+lassign [MirrorEdgeDrag lt $g $a 1000 500 -20 10] ng na
+Check "drag top left geom" $ng {-10 30 220 90}
+Check "drag top left area" [Round4 $na] {0.09 0.11 0.11 0.09}
+lassign [MirrorEdgeDrag l $g $a 1000 500 -5000 0] ng na
+Check "drag left clamped" [Round4 $na] {0.0 0.1 0.2 0.1}
+Check "drag left clamped geom" $ng {-190 20 400 100}
+lassign [MirrorEdgeDrag b $g $a 1000 500 0 -500] ng na
+Check "drag shrink min" $ng {10 20 200 16}
+# odd mouse moves snap to whole source pixels (2 mirror pixels at 2x)
+lassign [MirrorEdgeDrag r $g $a 1000 500 3 0] ng na
+Check "drag snaps" $ng {10 20 204 100}
+
+Check "next zoom" [MirrorNextZoom 1.997 1] 2.5
+Check "next zoom from near 2" [MirrorNextZoom 1.9 1] 2
+Check "prev zoom" [MirrorNextZoom 2 -1] 1.75
+Check "prev zoom from odd" [MirrorNextZoom 1.6 -1] 1.5
+Check "zoom max" [MirrorNextZoom 8 1] 8
+Check "zoom min" [MirrorNextZoom 0.1 -1] 0.1
+Check "third" [expr {round(300*[MirrorNextZoom 0.3 1])}] 100
+
+Check "inset 2x" [MirrorEditInset 100 50 200 100] {1 1 2 2}
+Check "inset 1:1" [MirrorEditInset 100 50 100 50] {2 2 2 2}
+Check "inset 3x" [MirrorEditInset 100 50 300 150] {1 1 3 3}
+Check "inset tiny" [MirrorEditInset 4 4 4 4] {0 0 0 0}
+
+# source size is the layout size of the slot's position
+array set slot2position {1 3 2 2 3 1}
+array set settings {1,size {1008 654} 3,size {336 218}}
+Check "main size" [MirrorSourceSize 3] {1008 654}
+Check "small size" [MirrorSourceSize 1] {336 218}
