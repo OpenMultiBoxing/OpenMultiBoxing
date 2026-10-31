@@ -6140,10 +6140,10 @@ array set settings {
     focusAlsoFG 1
     swapAlsoFocus 1
     numWindows 0
-    aspectRatio "Any"
+    aspectRatio "Same"
     ignoreMonitorIdx 0
     avoidTaskbar 1
-    layoutOneSize 1
+    layoutOneSize 0
     layoutOneRowCol 0
     layoutStacked 0
     layoutMirrored 0
@@ -6156,7 +6156,7 @@ array set settings {
     overlayFocusColor "#0080ff"
     overlayAlpha 0.7
     overlayAnchor n
-    overlayShowBorder 1
+    overlayShowBorder 0
     overlayClickable 1
     overlayAllClickable 0
     overlayFontSize1 48
