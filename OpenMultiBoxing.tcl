@@ -6214,10 +6214,14 @@ proc FitMenuBar {} {
 puts "OpenMultiBoxing $vers started..."
 Defer 100 FindExisting
 set bottomText "OpenMultiBoxing $vers"
-wm state . normal
 if {[info exists settings(mainWindowGeometry)]} {
+    wm state . normal
+    # once shown and sized: the window was created hidden (at the Windows default position) and
+    # applying its size after showing it would put it back there
+    update idletasks
     catch {wm geometry . $settings(mainWindowGeometry)}
 } else {
+    wm state . normal
     FitMenuBar
 }
 bind . <Configure> {set settings(mainWindowGeometry) [wm geometry .]}
