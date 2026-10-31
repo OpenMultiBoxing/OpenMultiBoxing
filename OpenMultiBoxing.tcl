@@ -774,6 +774,7 @@ proc ProfileRotationDialog {} {
         toplevel $tw
         wm title $tw "OMB Profiles in rotation"
         wm resizable $tw 0 0
+        RememberGeometry $tw profileRotationGeometry
         grid [ttk::label $tw.l -text "Profiles cycled through by\n[HK nextProfile] (next) and [HK previousProfile] (previous):"] -padx 8 -pady 4 -sticky w
         grid [ttk::button $tw.close -text Close -command [list destroy $tw]] -row 2 -padx 8 -pady 6
         UpdateHandles
@@ -826,45 +827,48 @@ proc IsInside {x y x1 y1 x2 y2} {
     expr {$x>=$x1 && $x<=$x2 && $y>=$y1 && $y<=$y2}
 }
 
-proc Offscreen {x y} {
-    global displayInfo
-    if {![info exists displayInfo]} {
-        # only extract it the first time
-        set displayInfo [twapi::get_multiple_display_monitor_info]
-        Debug "displayInfo = $displayInfo"
+# Whether the top left corner of a saved WxH+X+Y geometry is on one of the current monitors
+# (the monitors may have changed since; that's enough to drag it back, and some like them barely visible)
+proc GeometryOnScreen {g} {
+    if {![regexp {\+(-?\d+)\+(-?\d+)$} $g -> x y]} {
+        return 0
     }
-    set i 0
-    foreach monitor $displayInfo {
-        incr i 1
-        array set info $monitor
-        lassign $info(-extent) x1 y1 x2 y2
-        Debug "Monitor $i Extent   $x1,$y1  - $x2,$y2"
+    foreach monitor [MonitorsInfo] {
+        lassign [dict get $monitor -extent] x1 y1 x2 y2
         if {[IsInside $x $y $x1 $y1 $x2 $y2]} {
-            return false
+            return 1
         }
     }
-    return true
+    Debug "Saved geometry $g is off screen"
+    return 0
 }
 
-proc OffscreenGeometryCheck {} {
+# Puts toplevel tw back where it was (settings(key), with its size if withSize) unless that's off screen,
+# and keeps settings(key) up to date. Returns 1 if restored
+proc RememberGeometry {tw key {withSize 0}} {
     global settings
-    foreach k {mainWindowGeometry clipGeometry consoleGeometry} {
-        if {![info exists settings($k)]} {
-            continue
+    set restored 0
+    if {[info exists settings($key)] && [GeometryOnScreen $settings($key)]} {
+        set g $settings($key)
+        if {!$withSize} {
+            regexp {[+-]-?\d+[+-]-?\d+$} $g g
         }
-        regexp {\+(.*?)\+(.*?)$} $settings($k) all x y
-        Debug "geometry for $k is at $x,$y"
-        if {[Offscreen $x $y]} {
-            Debug "unsetting offscreen geometry $k"
-            unset settings($k)
-        }
+        set restored [expr {![catch {wm geometry $tw $g}]}]
+    }
+    bind $tw <Configure> [list RecordGeometry $tw $key %W]
+    return $restored
+}
+
+proc RecordGeometry {tw key w} {
+    global settings
+    # also called for the widgets inside
+    if {$w eq $tw} {
+        set settings($key) [wm geometry $tw]
     }
 }
 
 proc AfterSettings {} {
     global settings maxNumW slot2handle
-    # Handle off screen/geometry change
-    OffscreenGeometryCheck
     if {$settings(hk,swapNextWindow)=="Binding for next window swap is set on 'hk1,swap'"} {
         set settings(hk,swapNextWindow) "Ctrl-0xC0"
     }
@@ -1197,10 +1201,7 @@ proc ClipboardManager {} {
     UpdateHandles
     focus $tw.e
     bind $tw.e <Return> BroadcastClipboard
-    if {[info exists settings(clipGeometry)]} {
-        catch {wm geometry .clip $settings(clipGeometry)}
-    }
-    bind .clip <Configure> {set settings(clipGeometry) [wm geometry .clip]}
+    RememberGeometry $tw clipGeometry 1
 }
 
 #### end of clipboard management ####
@@ -1365,6 +1366,7 @@ proc MouseTracking {} {
     }
     toplevel $tw
     wm title $tw "OMB Mouse Tracking"
+    RememberGeometry $tw mouseTrackingGeometry
     grid [ttk::button $tw.bml -width 14 -text "Track mouse" -command StartStopMouseTrack] [entry $tw.emt -textvariable mouseCoords -width 14] -padx 4 -sticky w
     tooltip $tw.bml "Start/Stop mouse tracking\nHotkey: [HK mouseTrack]"
     grid [ttk::label $tw.la -text "Coords in area"] [entry $tw.ema -textvariable mouseArea -width 14] -padx 4 -sticky w
@@ -2315,6 +2317,7 @@ proc HotkeysDialog {} {
         toplevel $tw
         wm title $tw "OMB Hotkeys"
         wm resizable $tw 0 0
+        RememberGeometry $tw hotkeysGeometry
         wm protocol $tw WM_DELETE_WINDOW {HotkeysDialogClose 1}
         ttk::style configure OmbHotkeyFailed.TButton -foreground red
         ttk::style configure OmbHotkeyCapture.TButton -font WOBBold
@@ -3188,6 +3191,7 @@ proc WindowLayout {} {
     UpdateExcluded
     toplevel $tw
     wm title $tw "OpenMultiBoxing Window Layout"
+    RememberGeometry $tw layoutGeometry
     ttk::checkbutton $tw.cbA -variable settings(layoutAuto) -text "Auto" -command ChangeLayout
     tooltip $tw.cbA "Automatically regenerate the layout on any change\nwhen checked. Uncheck for manual layout"
     ttk::checkbutton $tw.cbT -variable settings(layoutTop) -text "Main at bottom" -command ChangeLayout
@@ -4379,6 +4383,7 @@ proc OverlayConfig {} {
     }
     toplevel $tw
     wm title $tw "OpenMultiBoxing Overlay Configuration"
+    RememberGeometry $tw overlayConfigGeometry
     grid [ttk::label $tw.l1 -text "Pick the location of the window number overlay:"] -columnspan 3
     grid [ttk::button $tw.b1 -text "\u2b76" -command "OverlayAnchor nw"] [ttk::button $tw.b2 -text "\u2b71" -command "OverlayAnchor n"] [ttk::button $tw.b3 -text "\u2b77" -command "OverlayAnchor ne"]
     grid [ttk::button $tw.b4 -text "\u2b70" -command "OverlayAnchor w"] [ttk::button $tw.b5 -text "\uB7" -command "OverlayAnchor c"] [ttk::button $tw.b6 -text "\u2b72" -command "OverlayAnchor e"]
@@ -5994,6 +5999,7 @@ proc MirrorsDialog {} {
         toplevel $tw
         wm title $tw "OMB Mirrors"
         wm resizable $tw 0 0
+        RememberGeometry $tw mirrorsGeometry
         wm protocol $tw WM_DELETE_WINDOW MirrorsDialogClose
         set help "Mirrors are live copies of an area of a game window, e.g. the minimap.\n"
         append help "They show the window they were taken from, wherever it is\n"
@@ -6219,15 +6225,12 @@ puts "OpenMultiBoxing $vers started..."
 Defer 100 FindExisting
 set bottomText "OpenMultiBoxing $vers"
 wm state . normal
-if {[info exists settings(mainWindowGeometry)]} {
-    catch {wm geometry . $settings(mainWindowGeometry)}
-} else {
+if {![RememberGeometry . mainWindowGeometry 1]} {
     FitMenuBar
 }
-bind . <Configure> {set settings(mainWindowGeometry) [wm geometry .]}
-# -debug console position
+# -debug console position (in its own interpreter)
 if {$forceDebug && ![catch {console eval {winfo exists .}}]} {
-    if {[info exists settings(consoleGeometry)]} {
+    if {[info exists settings(consoleGeometry)] && [GeometryOnScreen $settings(consoleGeometry)]} {
         catch {console eval [list wm geometry . $settings(consoleGeometry)]}
     }
     catch {console eval {bind . <Configure> {consoleinterp eval [list set settings(consoleGeometry) [wm geometry .]]}}}
