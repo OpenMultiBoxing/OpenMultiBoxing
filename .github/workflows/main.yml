@@ -26,6 +26,7 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: OpenMultiBoxing/BuildKit
+          ref: zip-runtime # TEMP until BuildKit's zip-runtime PR is merged
           path: buildkit
 
       - name: Get and set the version
@@ -51,10 +52,12 @@ jobs:
         run: |
           cd buildkit
           cp ..\OpenMultiBoxing.tcl OpenMultiBoxing.vfs\app\
-          Add-Content -Path OpenMultiBoxing.vfs\tclkit.inf -Value "ProductVersion ""${{ steps.get_version.outputs.VERSION }}""" -PassThru
-          tclkit\tclkit.exe sdx\sdx.kit wrap OpenMultiBoxing -runtime runtime.exe
-          Rename-Item OpenMultiBoxing OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe
+          .\build.ps1 -Out OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe -Version ${{ steps.get_version.outputs.VERSION }}
           Compress-Archive -Path OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe,..\README.txt,..\*.bat -DestinationPath OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.zip
+
+      - name: Make the Microsoft Store package
+        run: |
+          msix\pack.ps1 -Exe buildkit\OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe -Version ${{ steps.get_version.outputs.VERSION }} -Out OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix
 
 
       - name: Create Release
@@ -88,4 +91,14 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps
           asset_path: OpenMultiBoxing.tcl
           asset_name: OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.tcl
+          asset_content_type: application/octet-stream
+
+      - name: Upload Store package
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix
+          asset_name: OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix
           asset_content_type: application/octet-stream

@@ -110,6 +110,19 @@ proc HasArg {argName} {
     expr {[lsearch $argv $argName]!=-1}
 }
 
+# Microsoft Store (MSIX) install, marked by an OpenMultiBoxing.store file next to the exe: that folder is read-only
+# and the Store does the updates, so settings and profiles go in Documents\OpenMultiBoxing. Returns "" when not in
+# the Store.
+proc StoreDataDir {exeDir} {
+    if {![file exists [file join $exeDir "OpenMultiBoxing.store"]]} {
+        return ""
+    }
+    if {[catch {twapi::get_shell_folder csidl_personal} docs] || $docs eq ""} {
+        set docs [file join $::env(USERPROFILE) Documents]
+    }
+    return [file join [file normalize $docs] OpenMultiBoxing]
+}
+
 if {![info exists wobInitDone]} {
     set wobInitDone 1
     set forceDebug 0
@@ -133,10 +146,20 @@ if {![info exists wobInitDone]} {
     # Normalize appdir in case we're inside the binary
     set inExe [regsub -nocase {/[^/]+\.exe/app$} $app_dir {} app_dir]
     Debug "Post exe detection app_dir: $app_dir"
+    set inStore 0
+    if {$inExe} {
+        set storeDir [StoreDataDir $app_dir]
+        if {$storeDir ne ""} {
+            file mkdir $storeDir
+            set app_dir $storeDir
+            set inStore 1
+            Debug "Microsoft Store install, settings in $app_dir"
+        }
+    }
     set SETTINGS_FILE [file join $app_dir $SETTINGS_BASE]
     set update_path [file join $app_dir $script_name]
     Debug "Base settings: $SETTINGS_FILE"
-    if {$inExe} {
+    if {$inExe && !$inStore} {
         # We're inside the exe, check for updated code
         Debug "In EXE, checking for code outside: $update_path"
         if {[file readable $update_path]} {
@@ -153,7 +176,14 @@ if {![info exists wobInitDone]} {
 }
 
 proc CheckForUpdates {silent} {
-    global vers update_path settings errorInfo
+    global vers update_path settings errorInfo inStore
+    if {[info exists inStore] && $inStore} {
+        if {!$silent} {
+            OmbMessage -type ok -icon info -title "Updates" \
+                -message "This OpenMultiBoxing is from the Microsoft Store, which installs its updates."
+        }
+        return
+    }
     set url "https://api.github.com/repos/OpenMultiBoxing/OpenMultiBoxing/releases/latest"
     if {[catch {set token [http::geturl $url]} err]} {
         OmbError "OpenMultiBoxing network error" "Url fetch error $err"
