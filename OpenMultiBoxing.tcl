@@ -2055,6 +2055,10 @@ proc FindExisting {} {
         updateListBox $n $w $wname
         UpdateN $n
     }
+    if {[LayoutMirrored]} {
+        # all at the main position: whichever was on top (main when we exited) goes under OMB 1
+        StackUnderMain
+    }
     if {$firstMissing} {
         set nextWindow $firstMissing
     }
@@ -2621,12 +2625,16 @@ proc FocusNinternal {n fg} {
     Debug "FocusN $n called, at position $p - fg is $fg"
     if {$hasRR} {
         Foreground $wh
+    } elseif {$fg && $settings(focusAlsoFG)} {
+        # activating it also gives it the keys, while set_focus waits for both games to handle
+        # the focus change (100s of ms for one stacked under main in the mirrored layout)
+        Debug "Making $n foreground"
+        if {![Foreground $wh]} {
+            Debug "Foreground of $n refused, setting focus"
+            Focus $wh
+        }
     } else {
         Focus $wh
-        if {$fg && $settings(focusAlsoFG)} {
-            Debug "Also making $n foreground"
-            Foreground $wh
-        }
     }
     if {$p != 1 && [LayoutMirrored]} {
         # keys go to that window but main stays visible (on top of it)

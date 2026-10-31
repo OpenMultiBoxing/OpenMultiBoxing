@@ -86,3 +86,25 @@ array set slot2handle {3 {0x3 HWND}}
 array set slot2position {1 3 2 2 3 1}
 Forget 3
 Check "not mirrored forget" $mainSet {}
+
+# windows found at startup: in the mirrored layout, the one left on top goes under window 1
+proc twapi::find_windows {args} {
+    if {[regexp {\^(?:OMB|WoW) (\d+)\$} [dict get $args -text] -> n] && $n <= 2} {
+        return [list [list 0x$n HWND]]
+    }
+}
+proc updateListBox {n w wname} {global slot2handle slot2position; set slot2handle($n) $w; set slot2position($n) $n}
+proc CheckAutoKill {} {}
+proc StackUnderMain {} {global stacked; incr stacked}
+array unset slot2handle
+array unset slot2position
+array set settings {numWindows 2}
+set stacked 0
+set mirrored 1
+FindExisting
+Check "found windows" [lsort [array names slot2handle]] {1 2}
+Check "mirrored startup stacks under main" $stacked 1
+set stacked 0
+set mirrored 0
+FindExisting
+Check "regular startup doesn't stack" $stacked 0
