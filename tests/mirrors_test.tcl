@@ -86,6 +86,25 @@ set settings(mirrors) [list [dict create source main area {0 0 1 1} geom {1 2 3 
 Check "extra mirror ignored" [catch {MirrorRefresh 1} err] 0
 destroy .mirror1
 
+# picking the window to mirror in the mirrored layout: only the one on top
+proc MirrorCheckBinary {} {return 1}
+proc MirrorOverlay {t n cursor text} {
+    toplevel $t
+    canvas $t.c
+    $t.c create text 0 0 -text $text -tags label
+}
+array set slot2position {1 3 2 2 3 1}
+array set slot2handle {1 {0x1 HWND} 2 {0x2 HWND} 3 {0x3 HWND}}
+MirrorPick
+Check "pick only main" [lsort [lsearch -all -inline [winfo children .] .mirrorPick*]] .mirrorPickMain
+Check "pick main label" [lindex [split [.mirrorPickMain.c itemcget label -text] \n] 0] "OMB 3"
+array set slot2position {1 2 2 1 3 3}
+MirrorPickSwapped
+Check "pick label after swap" [lindex [split [.mirrorPickMain.c itemcget label -text] \n] 0] "OMB 2"
+Check "pick click after swap" [bind .mirrorPickMain.c <ButtonRelease-1>] "MirrorPickClose; MirrorSelect {} 2"
+MirrorPickClose
+array unset slot2handle
+
 Check "fit same ratio" [MirrorFit 1600 900 320 180] {0 0 320 180}
 Check "fit wider spot" [MirrorFit 1600 900 400 180] {40 0 360 180}
 Check "fit taller spot" [MirrorFit 1600 900 320 240] {0 30 320 210}
