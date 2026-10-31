@@ -3204,7 +3204,8 @@ proc WindowLayout {} {
     ttk::checkbutton $tw.cb3 -variable settings(layoutStacked) -text "All Stacked" -command LayoutStackedChanged
     ttk::checkbutton $tw.cb4 -variable layoutMirrored -text "Mirrored" -command LayoutMirroredChanged
     tooltip $tw.cb1 "Check or uncheck to redo the layout with\nwindows of the same size (fastest switch later)\nor not (1 big main window and smaller minions windows)"
-    tooltip $tw.cb4 "All the game windows stacked under the main one,\nthe other positions show live mirrors of them:\nswaps are instant (no resizing). Click a mirror to make it main.\nFocus follows mouse only works for the main window.\nApplied by Save and Apply."
+    tooltip $tw.cb4 "All the game windows stacked under the main one,\nthe other positions show live mirrors of them:\nswaps are instant (no resizing). Click a mirror to make it main.\nFocus follows mouse only works for the main window."
+    tooltip $tw.cb3 "All the windows at the same place, filling the biggest monitor:\nonly the one on top (main) is visible, swap to see another one\n(Mirrored also shows the others)"
     set layoutNumWindowsText "Layout for 99 windows"
     set width [expr {2+[string length $layoutNumWindowsText]}]
     UpdateLayoutNumWindows
@@ -3220,6 +3221,7 @@ proc WindowLayout {} {
     ttk::radiobutton $tw.asrf.ar4 -value "16/9" -text "16:9" -variable settings(aspectRatio) -command ChangeLayout
     ttk::radiobutton $tw.asrf.ar5 -value "21/9" -text "21:9" -variable settings(aspectRatio) -command ChangeLayout
     ttk::radiobutton $tw.asrf.ar6 -value "Same" -text "Same" -variable settings(aspectRatio) -command ChangeLayout
+    tooltip $tw.asrf.ar0 "Biggest windows that fit, whatever their aspect ratio\n(but not taller than wide: 5:4 for portrait spaces)"
     tooltip $tw.asrf.ar6 "Biggest small windows (as with Any),\nthen their aspect ratio for all windows\n(so swapping windows and mouse clicks match)"
     pack [ttk::label $tw.asrf.l2 -text "Aspect ratio:" -anchor w -justify left] $tw.asrf.ar0  $tw.asrf.ar1  $tw.asrf.ar2  $tw.asrf.ar3  $tw.asrf.ar4  $tw.asrf.ar5 $tw.asrf.ar6 -side left -expand 1
     grid $tw.asrf -padx 3 -pady 6 -columnspan 6 -sticky we
