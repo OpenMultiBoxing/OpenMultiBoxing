@@ -2621,12 +2621,16 @@ proc FocusNinternal {n fg} {
     Debug "FocusN $n called, at position $p - fg is $fg"
     if {$hasRR} {
         Foreground $wh
+    } elseif {$fg && $settings(focusAlsoFG)} {
+        # activating it also gives it the keys, while set_focus waits for both games to handle
+        # the focus change (100s of ms for one stacked under main in the mirrored layout)
+        Debug "Making $n foreground"
+        if {![Foreground $wh]} {
+            Debug "Foreground of $n refused, setting focus"
+            Focus $wh
+        }
     } else {
         Focus $wh
-        if {$fg && $settings(focusAlsoFG)} {
-            Debug "Also making $n foreground"
-            Foreground $wh
-        }
     }
     if {$p != 1 && [LayoutMirrored]} {
         # keys go to that window but main stays visible (on top of it)
