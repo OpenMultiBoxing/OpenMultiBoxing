@@ -689,10 +689,14 @@ proc SaveSettings {args} {
 }
 
 proc LoadProfile {} {
-    global settings
+    global settings layoutMirrored
     set profile $settings(profile)
     set pf [ProfileFileName $profile]
+    # profiles saved before mirrors existed don't have them: none rather than the previous profile's
+    set prev [list mirrors $settings(mirrors) layoutMirrored $settings(layoutMirrored)]
+    array set settings {mirrors {} layoutMirrored 0}
     if {[catch {source -encoding utf-8 $pf} err]} {
+        array set settings $prev
         puts stderr "Error sourcing profile $pf\n$err"
         OmbError "OpenMultiBoxing profile error" \
             "Your $pf has an error: $err\nYou can remove it and use Refresh Profiles in the menu."
@@ -701,13 +705,16 @@ proc LoadProfile {} {
     }
     # Otherwise can be reset when switching from Profile N back to Default
     set settings(profile) $profile
+    # the Window Layout checkbox, applied by its Save and Apply
+    set layoutMirrored $settings(layoutMirrored)
     AfterSettings
-    ResetAll
+    # before ResetAll: the previous profile's mirrors don't match the new settings(mirrors)
     # at startup that's done once the main window is shown (creating the mirrors would create it
     # hidden at the Windows default position, where it would go back when shown)
     if {[winfo exists .logo]} {
         MirrorsRebuild
     }
+    ResetAll
 }
 
 # Profiles cycled through by the next/previous profile hotkeys
@@ -1901,6 +1908,11 @@ proc Forget {n} {
     }
     set wh $slot2handle($n)
     set forgottenSlot($wh) $n
+    if {$n != 1 && [info exists slot2position($n)] && $slot2position($n) == 1 && [info exists slot2handle(1)]
+            && [LayoutMirrored]} {
+        # main in the mirrored layout (it would stay on top of the others): window 1 goes back to main first
+        SetAsMain 1
+    }
     if {[info exists origTitle($wh)]} {
         set title $origTitle($wh)
         unset origTitle($wh)
@@ -5417,7 +5429,8 @@ proc MirrorCreate {i} {
 proc MirrorRefresh {i} {
     global settings slot2handle mirrorEdit
     set t .mirror$i
-    if {![winfo exists $t]} {
+    # (an error here, through UpdateN, would make all the windows lost)
+    if {![winfo exists $t] || $i >= [llength $settings(mirrors)]} {
         return
     }
     set m [lindex $settings(mirrors) $i]

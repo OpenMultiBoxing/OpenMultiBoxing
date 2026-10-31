@@ -80,6 +80,12 @@ set mirroredExiting 1
 Check "unstacked on exit" [RealPosition 3] 3
 unset mirroredExiting
 
+# a mirror left from a profile with more of them (refreshed before the rebuild)
+toplevel .mirror1
+set settings(mirrors) [list [dict create source main area {0 0 1 1} geom {1 2 3 4} top 1]]
+Check "extra mirror ignored" [catch {MirrorRefresh 1} err] 0
+destroy .mirror1
+
 Check "fit same ratio" [MirrorFit 1600 900 320 180] {0 0 320 180}
 Check "fit wider spot" [MirrorFit 1600 900 400 180] {40 0 360 180}
 Check "fit taller spot" [MirrorFit 1600 900 320 240] {0 30 320 210}
