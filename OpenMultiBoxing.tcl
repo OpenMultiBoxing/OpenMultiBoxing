@@ -708,12 +708,13 @@ proc LoadProfile {} {
     # the Window Layout checkbox, applied by its Save and Apply
     set layoutMirrored $settings(layoutMirrored)
     AfterSettings
-    ResetAll
+    # before ResetAll: the previous profile's mirrors don't match the new settings(mirrors)
     # at startup that's done once the main window is shown (creating the mirrors would create it
     # hidden at the Windows default position, where it would go back when shown)
     if {[winfo exists .logo]} {
         MirrorsRebuild
     }
+    ResetAll
 }
 
 # Profiles cycled through by the next/previous profile hotkeys
@@ -5428,7 +5429,8 @@ proc MirrorCreate {i} {
 proc MirrorRefresh {i} {
     global settings slot2handle mirrorEdit
     set t .mirror$i
-    if {![winfo exists $t]} {
+    # (an error here, through UpdateN, would make all the windows lost)
+    if {![winfo exists $t] || $i >= [llength $settings(mirrors)]} {
         return
     }
     set m [lindex $settings(mirrors) $i]

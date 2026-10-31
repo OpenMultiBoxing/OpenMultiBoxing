@@ -44,4 +44,15 @@ Check "broken profile error" [llength $errors] 1
 Check "broken profile keeps mirrors" [llength $settings(mirrors)] 1
 Check "broken profile back to default" $settings(profile) Default
 
+# the previous profile's mirrors are rebuilt before ResetAll refreshes them
+set calls {}
+proc ResetAll {} {global calls; lappend calls ResetAll}
+proc MirrorsRebuild {} {global calls; lappend calls MirrorsRebuild}
+wm withdraw .
+label .logo
+set settings(profile) Old
+LoadProfile
+Check "mirrors rebuilt before reset" $calls {MirrorsRebuild ResetAll}
+destroy .logo
+
 file delete -force $app_dir
