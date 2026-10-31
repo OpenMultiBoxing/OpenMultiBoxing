@@ -703,7 +703,11 @@ proc LoadProfile {} {
     set settings(profile) $profile
     AfterSettings
     ResetAll
-    MirrorsRebuild
+    # at startup that's done once the main window is shown (creating the mirrors would create it
+    # hidden at the Windows default position, where it would go back when shown)
+    if {[winfo exists .logo]} {
+        MirrorsRebuild
+    }
 }
 
 # Profiles cycled through by the next/previous profile hotkeys
@@ -844,7 +848,7 @@ proc Offscreen {x y} {
 
 proc OffscreenGeometryCheck {} {
     global settings
-    foreach k {mainWindowGeometry clipGeometry} {
+    foreach k {mainWindowGeometry clipGeometry consoleGeometry} {
         if {![info exists settings($k)]} {
             continue
         }
@@ -6214,17 +6218,20 @@ proc FitMenuBar {} {
 puts "OpenMultiBoxing $vers started..."
 Defer 100 FindExisting
 set bottomText "OpenMultiBoxing $vers"
+wm state . normal
 if {[info exists settings(mainWindowGeometry)]} {
-    wm state . normal
-    # once shown and sized: the window was created hidden (at the Windows default position) and
-    # applying its size after showing it would put it back there
-    update idletasks
     catch {wm geometry . $settings(mainWindowGeometry)}
 } else {
-    wm state . normal
     FitMenuBar
 }
 bind . <Configure> {set settings(mainWindowGeometry) [wm geometry .]}
+# -debug console position
+if {$forceDebug && ![catch {console eval {winfo exists .}}]} {
+    if {[info exists settings(consoleGeometry)]} {
+        catch {console eval [list wm geometry . $settings(consoleGeometry)]}
+    }
+    catch {console eval {bind . <Configure> {consoleinterp eval [list set settings(consoleGeometry) [wm geometry .]]}}}
+}
 
 Defer 150 {raise .}
 if {$settings(numWindows)==0} {
