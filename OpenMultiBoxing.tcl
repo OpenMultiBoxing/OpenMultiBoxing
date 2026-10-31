@@ -1658,8 +1658,9 @@ proc PeriodicChecks {} {
          maxNumW pauseSchedule lastFocusWindow slot2handle mouseBroadcast prevNP networkPause
     after cancel $pauseSchedule
     set pauseSchedule {}
-    if {$settings(autoCapture) && ($maxNumW<=$settings(numWindows))} {
-        set w [FindGameWindow]
+    set freeSlot [FirstFreeSlot]
+    if {$settings(autoCapture) && $freeSlot ne ""} {
+        set w [FindGameWindow $freeSlot]
         if {$w != ""} {
             AutoCapture $w
         }
@@ -1882,12 +1883,13 @@ proc ContextMenu {n x y} {
 }
 
 proc Forget {n} {
-    global slot2handle slot2position settings savedWindowStyle origTitle
+    global slot2handle slot2position settings savedWindowStyle origTitle forgottenSlot
     if {![info exists slot2handle($n)]} {
         Debug "Nothing to forget for $n"
         return
     }
     set wh $slot2handle($n)
+    set forgottenSlot($wh) $n
     if {[info exists origTitle($wh)]} {
         set title $origTitle($wh)
         unset origTitle($wh)
@@ -1949,14 +1951,19 @@ proc GameFindWindows {pattern} {
     return [twapi::find_windows -match glob -text $glob -visible true]
 }
 
-proc FindGameWindow {} {
-    global settings
+# freeSlot: for auto capture into that window number, skips forgotten windows unless it's lower
+# than the one they were forgotten from (Forget OMB 3 with 1 lost: it becomes OMB 1)
+proc FindGameWindow {{freeSlot ""}} {
+    global settings forgottenSlot
     set wList [GameFindWindows $settings(game)]
     set minTime 0
     set minW ""
     foreach w $wList {
         # a wide pattern could match our own UI or already captured windows
         if {[IsOurs $w]} {
+            continue
+        }
+        if {$freeSlot ne "" && [info exists forgottenSlot($w)] && $freeSlot >= $forgottenSlot($w)} {
             continue
         }
         if {[catch {twapi::get_window_process $w} pid]} {
@@ -2912,11 +2919,24 @@ proc SaveOrigTitle {w} {
     catch {set origTitle($w) [twapi::get_window_text $w]}
 }
 
+# Lowest window number of the layout without a captured window (never captured, lost or forgotten), "" if none
+proc FirstFreeSlot {} {
+    global settings slot2handle
+    for {set n 1} {$n <= $settings(numWindows)} {incr n} {
+        if {![info exists slot2handle($n)]} {
+            return $n
+        }
+    }
+    return ""
+}
+
 proc AutoCapture {w} {
     global nextWindow settings stayOnTop lastUpdate slot2handle autoCaptureErrorCount
-    for {} {[info exists slot2handle($nextWindow)]} {incr nextWindow} {
-        Debug "Skipping existing nextwindow $nextWindow"
+    set n [FirstFreeSlot]
+    if {$n eq ""} {
+        return
     }
+    set nextWindow $n
     set wname "OMB $nextWindow"
     SaveOrigTitle $w
     if {[catch {
@@ -2988,7 +3008,8 @@ proc PostCapture {w wname} {
     }
     updateListBox $nextWindow $w $wname
     if {[LayoutMirrored]} {
-        LowerUnderMain $w
+        # the new window under main, or the others under it if it's main
+        StackUnderMain
         MirrorsRefreshAll
     }
 }
@@ -3066,10 +3087,17 @@ proc setFocusHandle {n} {
 }
 
 proc updateListBox {n w wname} {
-    global ourWindowHandles slot2handle slot2position nextWindow maxNumW settings slot2focus
+    global ourWindowHandles slot2handle slot2position nextWindow maxNumW settings slot2focus forgottenSlot
     FindFocusHandle $n $w
     set slot2handle($n) $w
+    unset -nocomplain forgottenSlot($w)
+    # lost while swapped: the window that is in its position goes back to its own
+    set m [SlotAtPosition $n]
     set slot2position($n) $n
+    if {$m ne "" && $m != $n} {
+        set slot2position($m) $m
+        CheckWindow [list UpdateN $m] $m
+    }
     set ourWindowHandles($w) [expr 2+$n]
     RegisterPerWindowHotkey $n $wname
     # 0 based index
