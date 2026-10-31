@@ -2772,6 +2772,7 @@ proc SetAsMain {n} {
     global settings lastFocusWindow swappedWindow
     windowIndicatorN $lastFocusWindow configure -foreground white
     SetAsMainInt $n
+    MirrorPickSwapped
     set swappedWindow $n
     if {$settings(swapAlsoFocus)} {
         CheckWindow [list FocusN $n true] $n
@@ -5907,7 +5908,7 @@ proc MirrorOverlay {t n cursor text} {
     wm geometry $t ${cw}x$ch+$x+$y
     canvas $t.c -background gray20 -highlightthickness 0
     pack $t.c -fill both -expand 1
-    $t.c create text [expr {$cw/2}] [expr {$ch/2}] -fill white -font WOBBold -justify center -text $text
+    $t.c create text [expr {$cw/2}] [expr {$ch/2}] -fill white -font WOBBold -justify center -text $text -tags label
     list $x $y $cw $ch
 }
 
@@ -5919,6 +5920,20 @@ proc MirrorPickClose {} {
     }
 }
 
+# Windows all at the main position (only the one on top can be picked)
+proc MirrorPickStacked {} {
+    global settings
+    expr {$settings(layoutStacked) || [LayoutMirrored]}
+}
+
+proc MirrorPickText {n} {
+    set s "OMB $n\nClick to mirror an area of this window"
+    if {[MirrorPickStacked]} {
+        append s "\n(swap first to mirror another one)"
+    }
+    append s "\n(Escape to cancel)"
+}
+
 # Step 1 of adding a mirror: an overlay on each game window, click one to then select its area
 proc MirrorPick {} {
     global slot2handle
@@ -5928,8 +5943,14 @@ proc MirrorPick {} {
     MirrorPickClose
     set t ""
     foreach n [array names slot2handle] {
-        set t .mirrorPick$n
-        if {[catch {MirrorOverlay $t $n hand2 "OMB $n\nClick to mirror an area of this window\n(Escape to cancel)"} err]} {
+        if {![MirrorPickStacked]} {
+            set t .mirrorPick$n
+        } elseif {$n eq [SlotAtPosition 1]} {
+            set t .mirrorPickMain
+        } else {
+            continue
+        }
+        if {[catch {MirrorOverlay $t $n hand2 [MirrorPickText $n]} err]} {
             Debug "Mirror pick OMB $n: $err"
             destroy $t
             continue
@@ -5943,6 +5964,18 @@ proc MirrorPick {} {
     } else {
         OmbError "No window to mirror" "No OMB window could be found, there is nothing to mirror"
     }
+}
+
+# Stacked windows: the pick overlay is for the window now on top
+proc MirrorPickSwapped {} {
+    set t .mirrorPickMain
+    set n [SlotAtPosition 1]
+    if {![winfo exists $t] || $n eq ""} {
+        return
+    }
+    $t.c itemconfigure label -text [MirrorPickText $n]
+    bind $t.c <ButtonRelease-1> "MirrorPickClose; MirrorSelect {} $n"
+    raise $t
 }
 
 # Transparent overlay on the source window to drag the area to mirror. i is the mirror to change,
