@@ -76,6 +76,9 @@ Check "mirrored small size" [MirrorSourceSize 1] {1008 654}
 set settings(layoutStacked) 1
 Check "stacked wins" [RealPosition 3] 3
 set settings(layoutStacked) 0
+set mirroredExiting 1
+Check "unstacked on exit" [RealPosition 3] 3
+unset mirroredExiting
 
 Check "fit same ratio" [MirrorFit 1600 900 320 180] {0 0 320 180}
 Check "fit wider spot" [MirrorFit 1600 900 400 180] {40 0 360 180}

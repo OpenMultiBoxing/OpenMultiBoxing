@@ -937,6 +937,7 @@ proc exit {{status 0}} {
     Debug "Exit $status called"
     catch {destroy .clip}
     after cancel [after info]
+    catch UnstackWindows
     RevertMouseFollow
     update
     after cancel [after info]
@@ -2620,7 +2621,12 @@ proc FocusMain {} {
 proc StayOnTopToggle {} {
     global lastFocusWindow settings slot2handle
     set settings($lastFocusWindow,stayOnTop) [expr {!$settings($lastFocusWindow,stayOnTop)}]
-    catch {SetStayOnTop $slot2handle($lastFocusWindow) $settings($lastFocusWindow,stayOnTop)}
+    if {[RealPosition $lastFocusWindow] == $lastFocusWindow} {
+        catch {SetStayOnTop $slot2handle($lastFocusWindow) $settings($lastFocusWindow,stayOnTop)}
+    } else {
+        # windows stacked under main: that's for their mirror
+        MirrorsRefreshAll
+    }
     Debug "StayOnTopToggle $lastFocusWindow now $settings($lastFocusWindow,stayOnTop)"
 }
 
@@ -2739,6 +2745,10 @@ proc SetAsMain {n} {
     if {$settings(swapAlsoFocus)} {
         CheckWindow [list FocusN $n true] $n
     } else {
+        if {[LayoutMirrored]} {
+            # raising main isn't allowed over another game's foreground window: lower the others
+            StackUnderMain
+        }
         windowIndicatorN $lastFocusWindow configure -foreground $settings(overlayFocusColor)
     }
 }
@@ -4557,7 +4567,7 @@ proc ResetAll {} {
 }
 
 proc SaveLayout {} {
-    global settings slot2position slot2handle scale sot layoutMirrored
+    global settings slot2position scale sot layoutMirrored
     set c .layout.c
     set settings(layoutMirrored) $layoutMirrored
     for {set i 1} {$i<=$settings(numWindows)} {incr i} {
@@ -4577,9 +4587,7 @@ proc SaveLayout {} {
     }
     if {[LayoutMirrored]} {
         # moving windows under main doesn't change their stacking order
-        foreach {n wh} [array get slot2handle] {
-            LowerUnderMain $wh
-        }
+        StackUnderMain
         RaiseMain
     }
     # mirrors of the new layout positions, or none
@@ -5224,8 +5232,21 @@ proc MirrorSourceSlot {source} {
 # Mirrored layout: all the game windows stacked at the main position, the other positions
 # show mirrors of them (swaps don't resize the windows)
 proc LayoutMirrored {} {
-    global settings
-    expr {$settings(layoutMirrored) && !$settings(layoutStacked) && [MirrorInit]}
+    global settings mirroredExiting
+    expr {$settings(layoutMirrored) && !$settings(layoutStacked) && ![info exists mirroredExiting] && [MirrorInit]}
+}
+
+# On exit the mirrors go away: the windows stacked under main go to their layout positions
+# (the mirrored layout setting stays on, they get stacked again at the next start)
+proc UnstackWindows {} {
+    global slot2handle mirroredExiting
+    if {![LayoutMirrored]} {
+        return
+    }
+    set mirroredExiting 1
+    foreach n [array names slot2handle] {
+        CheckWindow [list UpdateN $n] $n
+    }
 }
 
 # Layout position whose geometry the window in position p actually has
@@ -5517,6 +5538,13 @@ proc LowerUnderMain {wh} {
         return
     }
     twapi::SetWindowPos $wh $slot2handle($n) 0 0 0 0 0x4613
+}
+
+proc StackUnderMain {} {
+    global slot2handle
+    foreach {n wh} [array get slot2handle] {
+        LowerUnderMain $wh
+    }
 }
 
 proc MirrorsRefreshAll {} {
