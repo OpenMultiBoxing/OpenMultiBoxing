@@ -34,7 +34,7 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
 - Secure text (password) broadcasting option (can also broadcast slash commands, etc)
 - Many additional options to switch which window your keys are going to:
   - Swap windows with hotkeys.
-  - Focus follow mouse: turns on/off the Windows&trade; accessibility feature so you just hover a window to make it receive keys
+  - Focus follow mouse: turns on/off the Windows&trade; accessibility feature so you just hover a window to make it receive keys (instantly: OMB sets the hover delay to 0 ms, below the 100 ms minimum of the Windows slider)
   - Focus next/previous/specific windows with hotkeys.
 - Free, OpenSource and the Safest option available.
 - Online [help](https://OpenMultiBoxing.org/help), menus and tooltips on most UI element to help discovering features.

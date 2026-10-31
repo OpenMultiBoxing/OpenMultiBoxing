@@ -892,8 +892,13 @@ proc AfterSettings {} {
     RegisterAllHotkeys
     # Set mouse control to current values
     global mouseFollow mouseRaise mouseDelay
-    set mouseDelay [GetMouseDelay]
     set mouseFollow [GetFocusFollowMouse]
+    # Delay to restore when turning focus follow mouse off: don't capture our own
+    # settings(mouseDelay) as the user's (on reload or when left on by a previous run)
+    set curDelay [GetMouseDelay]
+    if {!$mouseFollow || (![info exists mouseDelay] && $curDelay != $settings(mouseDelay))} {
+        set mouseDelay $curDelay
+    }
     set mouseRaise [GetMouseRaise]
     LoadLayout
     Overlay
@@ -5165,11 +5170,13 @@ proc AddMouseToRRLabel {} {
 }
 
 proc UpdateMouseFollow {} {
-    global mouseFollow settings
+    global mouseFollow settings mouseDelay
     Debug "UpdateMouseFollow $mouseFollow $settings(mouseDelay)"
     SetFocusFollowMouse $mouseFollow
     if {$mouseFollow} {
         SetMouseDelay $settings(mouseDelay)
+    } elseif {[info exists mouseDelay]} {
+        SetMouseDelay $mouseDelay
     }
 }
 
