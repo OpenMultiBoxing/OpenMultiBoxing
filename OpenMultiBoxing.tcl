@@ -1666,6 +1666,7 @@ proc PeriodicChecks {} {
     if {$mouseBroadcast} {
         MouseBroadcastCheck
     }
+    CheckWindowsExist
     # Learn the focus window of captured windows as they get activated (see RefreshFocusHandle)
     if {![catch {twapi::get_foreground_window} fg] && $fg != ""} {
         set n [expr {[IsOurs $fg]-2}]
@@ -1734,6 +1735,23 @@ proc PeriodicChecks {} {
         }
     }
     set isPaused $shouldPause
+}
+
+# Every 200ms or so, notices closed game windows (e.g. so their mirrors go away)
+set lastWindowsCheck 0
+proc CheckWindowsExist {} {
+    global slot2handle lastWindowsCheck
+    set now [clock milliseconds]
+    if {$now-$lastWindowsCheck < 200} {
+        return
+    }
+    set lastWindowsCheck $now
+    foreach {n wh} [array get slot2handle] {
+        if {![twapi::window_exists $wh]} {
+            Debug "OMB $n window is gone"
+            WindowLost $n
+        }
+    }
 }
 
 proc mouseTrack {} {
@@ -1808,10 +1826,22 @@ proc CheckWindow {cmd n} {
         return
     }
     Debug "Error processing $cmd for $n: $err"
+    WindowLost $n
+}
+
+proc WindowLost {n} {
+    global slot2handle slot2position
     if {[info exists slot2handle($n)]} {
         set w slot2handle($n)
         unset slot2handle($n)
         UpdateHandles
+    }
+    # main gone in the mirrored layout (would show whichever window was under it): window 1,
+    # that was swapped into the lost window's position, goes back to main
+    if {$n != 1 && [info exists slot2position($n)] && $slot2position($n) == 1 && [info exists slot2handle(1)]
+            && [LayoutMirrored]} {
+        Debug "Main OMB $n lost, back to OMB 1"
+        SetAsMain 1
     }
     .b2 configure -text " Capture "
     UpdateForegroundMode
