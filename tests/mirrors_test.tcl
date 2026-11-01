@@ -124,6 +124,11 @@ set settings(mirrors) [list [dict create source 1 area {0 0 1 1} geom {0 0 10 10
 set mirrorEdit 0
 Check "clicks default" [list [MirrorClicks 0] [MirrorPassThrough 0]] {0 1}
 Check "clicks on" [list [MirrorClicks 1] [MirrorPassThrough 1]] {1 0}
+Check "key state none" [MirrorKeyState 0] 0
+Check "key state left+shift" [MirrorKeyState [expr {0x100|0x1}]] 5
+Check "key state right+middle+control" [MirrorKeyState [expr {0x400|0x200|0x4}]] [expr {0x02|0x10|0x08}]
+Check "middle button messages" [MirrorButtonMessages 2] {0x0207 0x0208 0x10}
+Check "other button ignored" [MirrorButtonMessages 4] ""
 set mirrorEdit 1
 Check "edit mode not pass through" [MirrorPassThrough 0] 0
 set mirrorEdit 0

@@ -5464,8 +5464,8 @@ proc MirrorHide {i} {
     wm withdraw .mirror$i
 }
 
-# Mirror i clicks: 0 go through to what's under it, 1 go to the same place in the source window
-# (posted messages)
+# Mirror i mouse: 0 clicks go through to what's under it, 1 moves, clicks and wheel go to the same
+# place in the source window (posted messages). On for new mirrors, off for ones from before v10.3
 proc MirrorClicks {i} {
     global settings
     set m [lindex $settings(mirrors) $i]
@@ -5503,15 +5503,11 @@ proc MirrorCreate {i} {
         toplevel $t -background $settings(overlayFocusColor) -cursor fleur
         wm overrideredirect $t 1
         wm attributes $t -alpha 0.99
-        # edit mode, else (clicks to the window mirrors) forwarded to the source window
-        bind $t <ButtonPress-1> [list MirrorPress $i 1 %x %y %X %Y]
-        bind $t <B1-Motion> [list MirrorMotion $i 1 %x %y %X %Y]
-        bind $t <Motion> [list MirrorMotion $i 0 %x %y %X %Y]
-        bind $t <ButtonRelease-1> [list MirrorRelease $i 1 %x %y]
-        bind $t <MouseWheel> "if {\$mirrorEdit} {MirrorZoom $i %D}"
-        bind $t <ButtonPress-3> [list MirrorPress $i 3 %x %y %X %Y]
-        bind $t <B3-Motion> [list MirrorMotion $i 2 %x %y %X %Y]
-        bind $t <ButtonRelease-3> [list MirrorRelease $i 3 %x %y]
+        # edit mode, else (mouse to the window mirrors) forwarded to the source window
+        bind $t <ButtonPress> [list MirrorPress $i %b %s %x %y %X %Y]
+        bind $t <ButtonRelease> [list MirrorRelease $i %b %s %x %y]
+        bind $t <Motion> [list MirrorMotion $i %s %x %y %X %Y]
+        bind $t <MouseWheel> [list MirrorWheel $i %D %s %X %Y]
     }
     $t configure -cursor [expr {$mirrorEdit ? "fleur" : "arrow"}]
     wm attributes $t -topmost [dict get $m top]
@@ -5520,39 +5516,69 @@ proc MirrorCreate {i} {
     MirrorClickThrough $t [MirrorPassThrough $i]
 }
 
-proc MirrorPress {i b x y X Y} {
+# Windows MK_* wParam flags for Tk event state s: buttons held and shift/control
+proc MirrorKeyState {s} {
+    set mk 0
+    foreach {tk win} {0x100 0x01 0x400 0x02 0x200 0x10 0x1 0x04 0x4 0x08} {
+        if {$s & $tk} {
+            set mk [expr {$mk | $win}]
+        }
+    }
+    return $mk
+}
+
+# Tk button b: Windows {down up} messages and its MK_ flag (left, middle, right)
+proc MirrorButtonMessages {b} {
+    switch $b {
+        1 {return {0x0201 0x0202 0x01}}
+        2 {return {0x0207 0x0208 0x10}}
+        3 {return {0x0204 0x0205 0x02}}
+    }
+    return ""
+}
+
+proc MirrorPress {i b s x y X Y} {
     global mirrorEdit
     if {$mirrorEdit} {
         if {$b == 1} {
             MirrorDragStart $i $X $Y
-        } else {
+        } elseif {$b == 3} {
             MirrorMenu $i $X $Y
         }
         return
     }
-    # WM_LBUTTONDOWN MK_LBUTTON, WM_RBUTTONDOWN MK_RBUTTON
-    if {$b == 1} {
-        MirrorForward $i 0x0201 1 $x $y
-    } else {
-        MirrorForward $i 0x0204 2 $x $y
+    lassign [MirrorButtonMessages $b] down up mk
+    if {$down ne ""} {
+        # the state is from before the press
+        MirrorForward $i $down [expr {[MirrorKeyState $s] | $mk}] $x $y
     }
 }
 
-# held: 0 none, 1 left, 2 right button
-proc MirrorMotion {i held x y X Y} {
+proc MirrorMotion {i s x y X Y} {
     global mirrorEdit
     if {$mirrorEdit} {
-        if {$held == 1} {
+        if {$s & 0x100} {
             MirrorDrag $i $X $Y
-        } elseif {$held == 0} {
+        } elseif {!($s & 0x700)} {
             MirrorCursor $i $x $y
         }
         return
     }
-    MirrorForward $i 0x0200 $held $x $y
+    MirrorForward $i 0x0200 [MirrorKeyState $s] $x $y
 }
 
-proc MirrorRelease {i b x y} {
+proc MirrorWheel {i delta s X Y} {
+    global mirrorEdit
+    if {$mirrorEdit} {
+        MirrorZoom $i $delta
+        return
+    }
+    set t .mirror$i
+    MirrorForward $i 0x020A [expr {(($delta & 0xFFFF)<<16) | [MirrorKeyState $s]}] \
+        [expr {$X-[winfo rootx $t]}] [expr {$Y-[winfo rooty $t]}]
+}
+
+proc MirrorRelease {i b s x y} {
     global mirrorEdit
     if {$mirrorEdit} {
         if {$b == 1} {
@@ -5560,8 +5586,11 @@ proc MirrorRelease {i b x y} {
         }
         return
     }
-    # WM_LBUTTONUP, WM_RBUTTONUP
-    MirrorForward $i [expr {$b == 1 ? 0x0202 : 0x0205}] 0 $x $y
+    lassign [MirrorButtonMessages $b] down up mk
+    if {$up ne ""} {
+        # the state is from before the release
+        MirrorForward $i $up [expr {[MirrorKeyState $s] & ~$mk}] $x $y
+    }
 }
 
 # Source client coordinates of x,y in a w x h mirror of the l t r b source client area
@@ -5588,7 +5617,12 @@ proc MirrorForward {i msg wParam x y} {
         lassign [dict get $m geom] gx gy w h
         lassign [MirrorToSourceArea $x $y $w $h $l $t $r $b] sx sy
         set lword [expr {($sy<<16)+$sx}]
-        if {$msg == 0x0201 || $msg == 0x0204} {
+        if {$msg == 0x020A} {
+            # WM_MOUSEWHEEL: wParam is the delta (high word), lParam in screen coordinates
+            set pt [dict create x $sx y $sy]
+            ClientToScreen [HwndInt $wh] pt
+            set lword [expr {(([dict get $pt y] & 0xFFFF)<<16) | ([dict get $pt x] & 0xFFFF)}]
+        } elseif {$msg in {0x0201 0x0204 0x0207}} {
             # button downs need a move first (the cursor isn't over the window)
             twapi::PostMessage $wh 0x0200 0 $lword
         }
@@ -6036,7 +6070,7 @@ proc MirrorMenu {i x y} {
     $mn add checkbutton -label "Stay on top" -variable mirrorMenuTop -command [list MirrorChangeTop $i]
     $mn add separator
     set mirrorMenuClicks [MirrorClicks $i]
-    $mn add checkbutton -label "Clicks go to the source window" -variable mirrorMenuClicks -command [list MirrorChangeClicks $i]
+    $mn add checkbutton -label "Mouse goes to the source window" -variable mirrorMenuClicks -command [list MirrorChangeClicks $i]
     $mn add radiobutton -label "Source: main window" -value main -variable mirrorMenuSource -command [list MirrorChangeSource $i]
     for {set n 1} {$n <= $settings(numWindows)} {incr n} {
         $mn add radiobutton -label "Source: OMB $n" -value $n -variable mirrorMenuSource -command [list MirrorChangeSource $i]
@@ -6215,7 +6249,7 @@ proc MirrorSelectDone {x1 y1 x2 y2} {
     if {$i eq ""} {
         # 1:1, shifted from the source area so it's visible, to be moved in edit mode
         lappend settings(mirrors) [dict create source $source area $area \
-            geom [list [expr {$sx+$l+30}] [expr {$sy+$t+30}] $w $h] top 1]
+            geom [list [expr {$sx+$l+30}] [expr {$sy+$t+30}] $w $h] top 1 clicks 1]
         set settings(mirrorsShown) 1
         MirrorsRebuild
         MirrorsEdit 1
@@ -6246,8 +6280,9 @@ proc MirrorsDialog {} {
         append help "While this window is open (edit mode), drag mirrors to move them,\n"
         append help "drag their sides to extend or shrink the mirrored area,\n"
         append help "use the mouse wheel to zoom and right click for options.\n"
-        append help "Otherwise mirrors let mouse clicks through, or send them\n"
-        append help "to the same place in their source window (right click option)."
+        append help "Otherwise the mouse acts on the source window: moves, clicks\n"
+        append help "and wheel go to the same place in it (right click option,\n"
+        append help "when off the mirror lets mouse clicks through)."
         grid [ttk::label $tw.l -justify left -text $help] -padx 8 -pady 6 -sticky w
         grid [ttk::button $tw.add -text "Add a mirror: click a window, then drag the area to mirror..." -command MirrorPick] -padx 8 -pady 4 -sticky we
         grid [ttk::checkbutton $tw.edit -text "Edit mode" -variable mirrorEdit -command {MirrorsEdit $mirrorEdit}] -padx 8 -sticky w
