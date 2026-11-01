@@ -112,3 +112,24 @@ Check "fit taller spot" [MirrorFit 1600 900 320 240] {0 30 320 210}
 Check "to source middle" [MirrorToSource 160 90 320 180 1600 900] {800 450}
 Check "to source letterboxed" [MirrorToSource 40 90 400 180 1600 900] {0 450}
 Check "to source in the bar" [MirrorToSource 5 300 400 180 1600 900] {0 899}
+
+# 2x mirror of the 200x100 area at 1400,0 (e.g. a minimap)
+Check "to area origin" [MirrorToSourceArea 0 0 400 200 1400 0 1600 100] {1400 0}
+Check "to area middle" [MirrorToSourceArea 200 100 400 200 1400 0 1600 100] {1500 50}
+Check "to area clamped" [MirrorToSourceArea 400 200 400 200 1400 0 1600 100] {1599 99}
+
+# clicks setting: missing in older settings means pass through
+set settings(mirrors) [list [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1] \
+    [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1 clicks 1]]
+set mirrorEdit 0
+Check "clicks default" [list [MirrorClicks 0] [MirrorPassThrough 0]] {0 1}
+Check "clicks on" [list [MirrorClicks 1] [MirrorPassThrough 1]] {1 0}
+Check "key state none" [MirrorKeyState 0] 0
+Check "key state left+shift" [MirrorKeyState [expr {0x100|0x1}]] 5
+Check "key state right+middle+control" [MirrorKeyState [expr {0x400|0x200|0x4}]] [expr {0x02|0x10|0x08}]
+Check "middle button messages" [MirrorButtonMessages 2] {0x0207 0x0208 0x10}
+Check "other button ignored" [MirrorButtonMessages 4] ""
+set mirrorEdit 1
+Check "edit mode not pass through" [MirrorPassThrough 0] 0
+set mirrorEdit 0
+set settings(mirrors) {}
