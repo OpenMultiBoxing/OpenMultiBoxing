@@ -2649,22 +2649,30 @@ proc FocusN {n fg {update 1}} {
 }
 
 proc FocusNinternal {n fg} {
-    global slot2handle slot2position lastFocusWindow settings hasRR hasBR
+    global slot2handle slot2position lastFocusWindow settings hasRR hasBR mouseFollow
     set wh $slot2handle($n)
     set p $slot2position($n)
     Debug "FocusN $n called, at position $p - fg is $fg"
+    set alsoFG [expr {$fg && $settings(focusAlsoFG)}]
     if {$hasRR} {
         Foreground $wh
-    } elseif {$fg && $settings(focusAlsoFG)} {
+    } elseif {$alsoFG && !$mouseFollow} {
         # activating it also gives it the keys, while set_focus waits for both games to handle
-        # the focus change (100s of ms for one stacked under main in the mirrored layout)
+        # the focus change (100s of ms for one stacked under main in the mirrored layout).
+        # Not with focus follows mouse: Windows would then move the cursor to the middle of
+        # the newly activated window (same reason RR turns it off)
         Debug "Making $n foreground"
         if {![Foreground $wh]} {
             Debug "Foreground of $n refused, setting focus"
             Focus $wh
         }
     } else {
+        # set_focus first: the window gets the keys, the cursor stays where it is
         Focus $wh
+        if {$alsoFG} {
+            Debug "Also making $n foreground"
+            Foreground $wh
+        }
     }
     if {$p != 1 && [LayoutMirrored]} {
         # keys go to that window but main stays visible (on top of it)
