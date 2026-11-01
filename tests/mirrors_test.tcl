@@ -129,6 +129,15 @@ Check "key state left+shift" [MirrorKeyState [expr {0x100|0x1}]] 5
 Check "key state right+middle+control" [MirrorKeyState [expr {0x400|0x200|0x4}]] [expr {0x02|0x10|0x08}]
 Check "middle button messages" [MirrorButtonMessages 2] {0x0207 0x0208 0x10}
 Check "other button ignored" [MirrorButtonMessages 4] ""
+set mirrorEdit 1
+Check "edit mode not pass through" [MirrorPassThrough 0] 0
+set mirrorEdit 0
+set settings(mirrors) {}
+
+# mirrors shown in the Window Layout window
+set settings(mirrors) [list [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1] \
+    [dict create source main area {0 0 1 1} geom {0 0 10 10} top 1]]
+set mirrorEdit 0
 LayoutShowMirrors
 toplevel .layout
 canvas .layout.c
@@ -138,19 +147,11 @@ LayoutShowMirrors
 Check "layout mirrors items" [llength [.layout.c find withtag mirrorShape]] 4
 Check "layout mirror scaled" [.layout.c coords [lindex [.layout.c find withtag mirrorShape] 0]] {0.0 0.0 2.5 2.5}
 Check "layout mirror ignores mouse" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape] 0] -state] disabled
-Check "layout mirror labels" [lmap t [.layout.c find withtag mirrorShape&&!mirrorShape0] {
-    if {[.layout.c type $t] ne "text"} continue; .layout.c itemcget $t -text}] {M1}
+Check "layout mirror label" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape0] 1] -text] M1
+Check "layout mirror main label" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape1] 1] -text] MM
 set mirrorEdit 1
 LayoutShowMirrors
 Check "layout mirror edit mode" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape] 0] -state] normal
-set settings(mirrors) [list [dict create source main area {0 0 1 1} geom {0 0 10 10} top 1]]
-LayoutShowMirrors
-Check "layout mirror main label" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape0] 1] -text] MM
-set mirrorEdit 0
-set settings(mirrors) [list [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1] \
-    [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1 clicks 1]]
-destroy .layout
-set mirrorEdit 1
-Check "edit mode not pass through" [MirrorPassThrough 0] 0
 set mirrorEdit 0
 set settings(mirrors) {}
+destroy .layout
