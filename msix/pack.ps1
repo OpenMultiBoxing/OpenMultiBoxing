@@ -21,6 +21,15 @@ $manifest = (Get-Content (Join-Path $PSScriptRoot AppxManifest.xml) -Raw).Replac
 Set-Content (Join-Path $Dir AppxManifest.xml) $manifest -NoNewline
 $makeappx = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe' | Sort-Object FullName |
     Select-Object -Last 1
+# resources.pri, for Windows to use the Square44x44Logo.targetsize-*_altform-unplated icons: without them the taskbar
+# draws the icon on a plate of the accent color
+$makepri = Join-Path $makeappx.DirectoryName makepri.exe
+$priconfig = Join-Path ([IO.Path]::GetTempPath()) "priconfig_$PID.xml"
+& $makepri createconfig /o /cf $priconfig /dq en-US /pv 10.0.0
+if ($LASTEXITCODE) { throw "makepri createconfig failed ($LASTEXITCODE)" }
+& $makepri new /o /pr $Dir /cf $priconfig /mn (Join-Path $Dir AppxManifest.xml) /of (Join-Path $Dir resources.pri)
+if ($LASTEXITCODE) { throw "makepri new failed ($LASTEXITCODE)" }
+Remove-Item $priconfig
 & $makeappx.FullName pack /o /d $Dir /p $Out
 if ($LASTEXITCODE) { throw "makeappx failed ($LASTEXITCODE)" }
 "Packaged $Out ($pkgVersion)"
