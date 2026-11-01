@@ -3984,9 +3984,6 @@ proc RRUpdate {} {
             .mf configure -state disabled
         }
         set rrTaskId [after $settings(rrInterval) RRCheck]
-        if {[winfo exists .o1.rr]} {
-            place configure .o1.rr -relx $settings(rrIndicator,x) -rely $settings(rrIndicator,y)
-        }
     } else {
         set rrOnLabel ""
         .mf configure -state enabled
@@ -4475,13 +4472,28 @@ proc OverlayConfig {} {
         grid [ttk::label $tw.lp1 -text "⟳ and 🖰 indicators position:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
     }
     grid [ttk::label $tw.lr3 -text "X:" -anchor e] [entry $tw.re2 -width 5 -textvariable settings(rrIndicator,x)] -sticky ew -padx 6
-    bind $tw.re2 <Return> "RRUpdate; SaveSettings"
+    bind $tw.re2 <Return> OverlayIndicatorPlace
     tooltip $tw.re2 "Relative horizontal position: 0 is left 1 is right, 0.5 is center"
     grid [ttk::label $tw.lr4 -text "Y:" -anchor e] [entry $tw.re3 -width 5 -textvariable settings(rrIndicator,y)] -sticky ew -padx 6
-    bind $tw.re3 <Return> "RRUpdate; SaveSettings"
+    bind $tw.re3 <Return> OverlayIndicatorPlace
     tooltip $tw.re3 "Relative vertical position: 0 is top 1 is bottom, 0.5 is center"
     grid [ttk::label $tw.lr5 -text "(Hit <Return> to update)" -anchor n] -pady 6 -columnspan 3
     UpdateHandles
+}
+
+# Moves the indicators on window 1's overlay to the X/Y of the overlay config, whatever is on
+proc OverlayIndicatorPlace {} {
+    global settings
+    set x $settings(rrIndicator,x)
+    set y $settings(rrIndicator,y)
+    if {![string is double -strict $x] || ![string is double -strict $y]} {
+        Debug "Invalid indicator position $x $y"
+        return
+    }
+    if {[winfo exists .o1.rr]} {
+        place configure .o1.rr -relx $x -rely $y
+    }
+    SaveSettings
 }
 
 proc OverlayChangeFocusColor {} {
