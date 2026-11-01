@@ -105,6 +105,11 @@ jobs:
         uses: microsoft/microsoft-store-apppublisher@v1.1
       - name: Submit to the Microsoft Store
         if: steps.get_version.outputs.PRERELEASE == 'false'
+        env:
+          TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
         run: |
-          msstore reconfigure --tenantId ${{ secrets.MSSTORE_TENANT_ID }} --sellerId ${{ secrets.MSSTORE_SELLER_ID }} --clientId ${{ secrets.MSSTORE_CLIENT_ID }} --clientSecret ${{ secrets.MSSTORE_CLIENT_SECRET }}
+          msstore reconfigure --tenantId $env:TENANT_ID.Trim() --sellerId $env:SELLER_ID.Trim() --clientId $env:CLIENT_ID.Trim() --clientSecret $env:CLIENT_SECRET.Trim()
           msstore publish OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix -id 9N0DZ59NL2DW
