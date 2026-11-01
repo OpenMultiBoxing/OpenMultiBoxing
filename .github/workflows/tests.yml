@@ -17,3 +17,5 @@ jobs:
       - name: Tests
         run: bash tests/run.sh
         shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

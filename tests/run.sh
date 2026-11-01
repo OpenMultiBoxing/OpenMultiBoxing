@@ -2,7 +2,7 @@
 # Runs tests/*_test.tcl (or the given ones) with the Tcl/Tk/twapi bundled in a release binary:
 # the binary sources a $runner_as found next to it, here tests/runner.tcl.
 # OMB_EXE: the binary to use, else the one in tests/bin/, downloaded from the latest release the first time.
-# OMB_TEST_APP: the .tcl under test, else ../$name.tcl.
+# OMB_TEST_APP: the .tcl under test, else ../$name.tcl. GITHUB_TOKEN, if set, for the latest release lookup.
 name=OpenMultiBoxing
 repo=OpenMultiBoxing/OpenMultiBoxing
 exe_glob='OpenMultiBoxing-v*.exe'
@@ -19,7 +19,10 @@ if [ -n "$exe" ] && [[ "$(basename "$exe")" != $exe_glob ]]; then
 fi
 [ -z "$exe" ] && exe=$(ls "$dir"/bin/$exe_glob 2>/dev/null | head -1)
 if [ -z "$exe" ]; then
-    url=$(curl -fsS https://api.github.com/repos/$repo/releases/latest |
+    # authenticated in CI: the anonymous API rate limit is shared by the runners
+    auth=()
+    [ -n "$GITHUB_TOKEN" ] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
+    url=$(curl -fsS "${auth[@]}" https://api.github.com/repos/$repo/releases/latest |
         grep -o '"browser_download_url": *"[^"]*\.zip"' | grep -o 'https://[^"]*')
     echo "Downloading $url"
     mkdir -p "$dir/bin"
