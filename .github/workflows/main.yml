@@ -53,6 +53,10 @@ jobs:
           cp ..\OpenMultiBoxing.tcl OpenMultiBoxing.vfs\app\
           .\build.ps1 -Out OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe -Version ${{ steps.get_version.outputs.VERSION }}
           Compress-Archive -Path OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe,..\README.txt,..\*.bat -DestinationPath OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.zip
+      # before any release is made: the tests with the new exe
+      - name: Tests
+        run: OMB_EXE=buildkit/OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe bash tests/run.sh
+        shell: bash
 
       - name: Make the Microsoft Store package
         run: |

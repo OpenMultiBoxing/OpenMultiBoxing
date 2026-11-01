@@ -1,0 +1,19 @@
+# The tests (tests/run.sh, with the latest release's exe) for pull requests and pushes to main;
+# tag builds run them with their new exe (main.yml)
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Tests
+        run: bash tests/run.sh
+        shell: bash
