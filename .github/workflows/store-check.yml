@@ -3,8 +3,6 @@ name: Store check
 
 on:
   workflow_dispatch:
-  push: # TEMP
-    branches: [store-ci]
 
 jobs:
   check:
