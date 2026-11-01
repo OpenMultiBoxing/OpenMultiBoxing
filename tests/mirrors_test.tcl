@@ -133,3 +133,25 @@ set mirrorEdit 1
 Check "edit mode not pass through" [MirrorPassThrough 0] 0
 set mirrorEdit 0
 set settings(mirrors) {}
+
+# mirrors shown in the Window Layout window
+set settings(mirrors) [list [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1] \
+    [dict create source main area {0 0 1 1} geom {0 0 10 10} top 1]]
+set mirrorEdit 0
+LayoutShowMirrors
+toplevel .layout
+canvas .layout.c
+set scale 0.25
+set settings(mirrorsShown) 1
+LayoutShowMirrors
+Check "layout mirrors items" [llength [.layout.c find withtag mirrorShape]] 4
+Check "layout mirror scaled" [.layout.c coords [lindex [.layout.c find withtag mirrorShape] 0]] {0.0 0.0 2.5 2.5}
+Check "layout mirror ignores mouse" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape] 0] -state] disabled
+Check "layout mirror label" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape0] 1] -text] M1
+Check "layout mirror main label" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape1] 1] -text] MM
+set mirrorEdit 1
+LayoutShowMirrors
+Check "layout mirror edit mode" [.layout.c itemcget [lindex [.layout.c find withtag mirrorShape] 0] -state] normal
+set mirrorEdit 0
+set settings(mirrors) {}
+destroy .layout
