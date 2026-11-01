@@ -3614,13 +3614,70 @@ proc SetWindowOnCanvas {id x1 y1 x2 y2} {
     if {$hasPin} {
         set pin "📌"
         set sot($id) 1
-        after idle "$c raise $tag; $c itemconfigure $tag&&wowWindow -fill #ffcc00"
+        after idle "$c raise $tag; $c raise mirrorShape; $c itemconfigure $tag&&wowWindow -fill #ffcc00"
     } else {
         set sot($id) 0
         after idle "$c itemconfigure $tag&&wowWindow -fill #ffd633"
     }
     $c create text $x1 $y1 -text "\n   ${pin}OMB $id${pin}\n   $w x $h" -anchor "nw" -tags $txtTags
     Debug "Window $id $x1,$y1 $x2,$y2 ($tags)"
+}
+
+# Shows the (manual) mirrors on the layout canvas, above the windows: "M<source window>", MM for main.
+# Blue in mirrors edit mode, with their info on mouse over; else grey and ignoring the mouse
+# (disabled items) so the windows under them can still be moved. Outline only when hidden
+proc LayoutShowMirrors {} {
+    global settings scale mirrorEdit
+    set c .layout.c
+    if {![winfo exists $c]} {
+        return
+    }
+    $c delete mirrorShape
+    set state disabled
+    set color grey50
+    if {$mirrorEdit} {
+        set state normal
+        set color #1e6fd9
+    }
+    set fill $color
+    if {!$settings(mirrorsShown)} {
+        set fill ""
+    }
+    set i 0
+    foreach m $settings(mirrors) {
+        lassign [dict get $m geom] x y w h
+        set src [dict get $m source]
+        set label M$src
+        if {$src eq "main"} {
+            set label MM
+        }
+        set tags [list mirrorShape mirrorShape$i]
+        $c create rectangle $x $y [expr {$x+$w}] [expr {$y+$h}] -outline $color -fill $fill -width 2 \
+            -state $state -tags $tags
+        $c create text [expr {$x+$w/2.}] [expr {$y+$h/2.}] -text $label \
+            -fill [expr {$fill eq "" ? $color : "white"}] -font TkSmallCaptionFont -state $state -tags $tags
+        $c bind mirrorShape$i <Enter> [list LayoutMirrorInfo $i]
+        incr i
+    }
+    $c scale mirrorShape 0 0 $scale $scale
+    $c raise mirrorShape
+}
+
+proc LayoutMirrorInfo {i} {
+    global settings layoutinfo
+    set m [lindex $settings(mirrors) $i]
+    set src [dict get $m source]
+    set n [MirrorSourceSlot $src]
+    set of "OMB $n"
+    if {$src eq "main"} {
+        set of "main window (now OMB $n)"
+    }
+    lassign [dict get $m geom] x y w h
+    set zoom ""
+    if {![catch {MirrorZoomOf $i} z]} {
+        set zoom [format ", Zoom %.2fx" $z]
+    }
+    set layoutinfo "Mirror of $of: Top Left ($x , $y) Size $w x $h$zoom"
 }
 
 proc UpdateWindowText {tag w h} {
@@ -3631,7 +3688,7 @@ proc UpdateWindowText {tag w h} {
     set pin ""
     if {$sot($id)} {
         set pin "📌"
-        after idle "$c raise $tag; $c itemconfigure $tag&&wowWindow -fill #ffcc00"
+        after idle "$c raise $tag; $c raise mirrorShape; $c itemconfigure $tag&&wowWindow -fill #ffcc00"
     } else {
         after idle "$c itemconfigure $tag&&wowWindow -fill #ffd633"
     }
@@ -3663,6 +3720,8 @@ proc LoadLayout {} {
     }
     $c scale wowAll 0 0 $scale $scale
     SetupMove
+    # after the stay on top windows get raised
+    after idle LayoutShowMirrors
 }
 
 proc SizeOfWindow {tag} {
@@ -4767,6 +4826,7 @@ proc ChangeLayout {args} {
     }
     $c scale wowAll 0 0 $scale $scale
     SetupMove
+    after idle LayoutShowMirrors
 }
 
 proc AutoLayout {n layoutOneSize} {
@@ -5163,6 +5223,7 @@ proc SetupMove {} {
             set y2 [expr {round($y2)}]
             %W create rectangle [expr {$x2-18}] [expr {$y2-18}] [expr {$x2-2}] [expr {$y2-2}] -fill orange -tags [list  $selectedTag "wowAll" "wowResize" "wowR1"]
             %W create rectangle [expr {$x2-14}] [expr {$y2-14}] [expr {$x2-2}] [expr {$y2-2}] -fill darkorange -tags [list  $selectedTag "wowAll" "wowResize" "wowR2"]
+            %W raise mirrorShape
         }
         UpdateLayoutInfo $selectedTag
     }
@@ -5447,6 +5508,7 @@ proc MirrorSaveSoon {} {
     global mirrorSaveId
     after cancel $mirrorSaveId
     set mirrorSaveId [after 1000 SaveSettings]
+    LayoutShowMirrors
 }
 set mirrorSaveId ""
 
@@ -5830,6 +5892,7 @@ proc MirrorsRebuild {} {
         MirrorDetach $i
         destroy .mirror$i
     }
+    LayoutShowMirrors
     if {[llength $settings(mirrors)] == 0} {
         return
     }
@@ -5856,6 +5919,7 @@ proc MirrorsEdit {on} {
         }
     }
     MirrorsRefreshAll
+    LayoutShowMirrors
     if {!$on} {
         SaveSettings
     }
@@ -5870,6 +5934,7 @@ proc MirrorsToggle {} {
     global settings
     set settings(mirrorsShown) [expr {!$settings(mirrorsShown)}]
     MirrorsRefreshAll
+    LayoutShowMirrors
 }
 
 # Sides (some of l r t b) of a w x h mirror near local x,y
@@ -6286,7 +6351,7 @@ proc MirrorsDialog {} {
         grid [ttk::label $tw.l -justify left -text $help] -padx 8 -pady 6 -sticky w
         grid [ttk::button $tw.add -text "Add a mirror: click a window, then drag the area to mirror..." -command MirrorPick] -padx 8 -pady 4 -sticky we
         grid [ttk::checkbutton $tw.edit -text "Edit mode" -variable mirrorEdit -command {MirrorsEdit $mirrorEdit}] -padx 8 -sticky w
-        grid [ttk::checkbutton $tw.shown -text "Show mirrors" -variable settings(mirrorsShown) -command "MirrorsRefreshAll; SaveSettings"] -padx 8 -sticky w
+        grid [ttk::checkbutton $tw.shown -text "Show mirrors" -variable settings(mirrorsShown) -command "MirrorsRefreshAll; LayoutShowMirrors; SaveSettings"] -padx 8 -sticky w
         grid [ttk::button $tw.close -text Close -command MirrorsDialogClose] -padx 8 -pady 6
         UpdateHandles
     }
