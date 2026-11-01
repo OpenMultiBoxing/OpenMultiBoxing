@@ -23,6 +23,17 @@ CheckForUpdates 1
 Check "silent store update check" [info exists messages] 0
 CheckForUpdates 0
 Check "store update check message" [string match "*Microsoft Store*" [lindex $messages 0]] 1
+# yes opens the Store page, so do the binary releases
+proc StorePage {} {global storePage; incr storePage}
+set storePage 0
+proc OmbMessage {args} {return no}
+CheckForUpdates 0
+Check "store page not opened" $storePage 0
+proc OmbMessage {args} {return yes}
+CheckForUpdates 0
+Check "store page opened" $storePage 1
+Releases
+Check "store page for releases" $storePage 2
 rename http::geturl {}
 rename http::geturl_orig http::geturl
 
