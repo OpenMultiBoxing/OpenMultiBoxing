@@ -1,0 +1,36 @@
+# Publishing a GitHub release (not a prerelease) submits it to the Microsoft Store, with its notes as "What's new";
+# run it from the Actions tab to (re)submit a published release. Certified, then published per Partner Center options.
+name: Store
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag (vX.Y.Z)
+        required: true
+
+jobs:
+  submit:
+    if: github.event_name == 'workflow_dispatch' || !github.event.release.prerelease
+    runs-on: windows-latest
+    steps:
+      # main's msix/ (submit.ps1 isn't in older tags), the exe comes from the release's zip
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Setup Microsoft Store Developer CLI
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+      - name: Submit to the Microsoft Store
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        run: |
+          msstore reconfigure --tenantId $env:TENANT_ID.Trim() --sellerId $env:SELLER_ID.Trim() --clientId $env:CLIENT_ID.Trim() --clientSecret $env:CLIENT_SECRET.Trim()
+          msix\submit.ps1 -Tag $env:TAG
