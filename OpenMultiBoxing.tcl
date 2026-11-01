@@ -178,9 +178,13 @@ if {![info exists wobInitDone]} {
 proc CheckForUpdates {silent} {
     global vers update_path settings errorInfo inStore
     if {[info exists inStore] && $inStore} {
+        # no network access from the Store build: the Store checks, when the user wants
         if {!$silent} {
-            OmbMessage -type ok -icon info -title "Updates" \
-                -message "This OpenMultiBoxing is from the Microsoft Store, which installs its updates."
+            set ans [OmbMessage -type yesno -icon info -title "Updates" \
+                -message "This OpenMultiBoxing ($vers) is from the Microsoft Store, which installs its updates.\n\nOpen its Store page to check for an update now?"]
+            if {$ans eq "yes"} {
+                StorePage
+            }
         }
         return
     }
@@ -2156,8 +2160,18 @@ proc Help {} {
 }
 
 proc Releases {} {
-    global vers
+    global vers inStore
+    if {[info exists inStore] && $inStore} {
+        # the Store installs the new binaries
+        StorePage
+        return
+    }
     twapi::shell_execute -path https://github.com/OpenMultiBoxing/OpenMultiBoxing/releases?v=$vers
+}
+
+# OMB's page in the Microsoft Store app, with its Update button when there's one
+proc StorePage {} {
+    twapi::shell_execute -path ms-windows-store://pdp/?ProductId=9N0DZ59NL2DW
 }
 
 proc EditSettings {} {
