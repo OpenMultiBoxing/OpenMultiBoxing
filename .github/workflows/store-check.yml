@@ -1,0 +1,22 @@
+# Run from the Actions tab to check the Microsoft Store (Partner Center API) secrets; read-only
+name: Store check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - name: Setup Microsoft Store Developer CLI
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+      - name: Get the app and its submission status
+        env:
+          TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        run: |
+          msstore reconfigure --tenantId $env:TENANT_ID.Trim() --sellerId $env:SELLER_ID.Trim() --clientId $env:CLIENT_ID.Trim() --clientSecret $env:CLIENT_SECRET.Trim()
+          msstore apps get 9N0DZ59NL2DW
+          msstore submission status 9N0DZ59NL2DW

@@ -92,12 +92,24 @@ jobs:
           asset_name: OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.tcl
           asset_content_type: application/octet-stream
 
-      - name: Upload Store package
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Not a release asset (users get it from the Store): in the run's artifacts, for manual submissions
+      - name: Keep the Store package
+        uses: actions/upload-artifact@v4
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix
-          asset_name: OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix
-          asset_content_type: application/octet-stream
+          name: OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix
+          path: OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix
+
+      # New Store submission for real releases (not -pre), certified then published per its Partner Center options
+      - name: Setup Microsoft Store Developer CLI
+        if: steps.get_version.outputs.PRERELEASE == 'false'
+        uses: microsoft/microsoft-store-apppublisher@v1.1
+      - name: Submit to the Microsoft Store
+        if: steps.get_version.outputs.PRERELEASE == 'false'
+        env:
+          TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+          SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+          CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+        run: |
+          msstore reconfigure --tenantId $env:TENANT_ID.Trim() --sellerId $env:SELLER_ID.Trim() --clientId $env:CLIENT_ID.Trim() --clientSecret $env:CLIENT_SECRET.Trim()
+          msstore publish OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.msix -id 9N0DZ59NL2DW
