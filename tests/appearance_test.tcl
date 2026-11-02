@@ -4,6 +4,7 @@ LoadProcs $env(OMB_TEST_APP)
 
 proc OverlayFontSizes {args} {global overlayStyles; incr overlayStyles}
 set overlayStyles 0
+set settings(overlayFontSize1) 48
 AppearanceInit
 
 toplevel .t

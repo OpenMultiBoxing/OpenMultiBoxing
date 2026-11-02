@@ -135,7 +135,8 @@ proc ClamDarkTheme {} {
 
 # Our own ttk styles: they belong to a theme, so again after each theme change
 proc OmbStyles {} {
-    if {[llength [info commands OverlayFontSizes]]} {
+    global settings
+    if {[llength [info commands OverlayFontSizes]] && [info exists settings(overlayFontSize1)]} {
         OverlayFontSizes
     }
     ttk::style configure OmbHotkeyFailed.TButton -foreground red
@@ -193,11 +194,14 @@ proc ApplyAppearance {args} {
     ClassicWidgetsColors . $dark
 }
 
-# new windows get the forced light/dark title bar too (once, the script can be sourced again on update)
-if {[string first TitleBarAppearance [bind all <Map>]] < 0} {
-    bind all <Map> {+TitleBarAppearance %W}
+# Once the settings are loaded: new windows get the forced light/dark title bar too, follow Windows changes
+proc AppearanceBindings {} {
+    # once, the script can be sourced again on update
+    if {[string first TitleBarAppearance [bind all <Map>]] < 0} {
+        bind all <Map> {+TitleBarAppearance %W}
+    }
+    bind . <<AppearanceChanged>> ApplyAppearance
 }
-bind . <<AppearanceChanged>> ApplyAppearance
 
 # handle updates from wrong/old binary
 #catch {
@@ -6693,6 +6697,7 @@ if {[info exists initProfile]} {
     LoadProfile
 }
 ApplyAppearance
+AppearanceBindings
 
 
 # -- get/save sequence
