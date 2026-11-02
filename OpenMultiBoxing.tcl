@@ -14,8 +14,180 @@ package require twapi_crypto
 http::register https 443 ::twapi::tls_socket
 package require tooltip
 namespace import tooltip::tooltip
-# tkk native
-ttk::style theme use winnative
+# Native Windows look until the settings pick the appearance (ApplyAppearance)
+ttk::style theme use vista
+
+# -- Appearance: native "vista" ttk theme when light, our palette on "clam" when dark.
+# settings(appearance): auto (follows the Windows app mode, Tk 9.1+), light or dark
+proc AppearanceInit {} {
+    global ombDark ombClassicColors ombClassicDbNames ombFieldClasses ombIsDark
+    array set ombDark {
+        bg #202020 fg #e8e8e8 field #2b2b2b border #3c3c3c sel #2f60d8 dis #6a6a6a
+        hover #333333 accent #4c8dff slider #6a6a6a
+    }
+    # Classic (non ttk) widgets options -> ombDark color, changed only while at their default
+    set ombClassicColors {
+        -background bg -foreground fg -activebackground hover -activeforeground fg
+        -highlightbackground bg -highlightcolor accent -selectbackground sel -selectforeground fg
+        -insertbackground fg -disabledforeground dis -readonlybackground field -selectcolor fg
+    }
+    # their option database names
+    set ombClassicDbNames {
+        -background background -foreground foreground -activebackground activeBackground
+        -activeforeground activeForeground -highlightbackground highlightBackground -highlightcolor highlightColor
+        -selectbackground selectBackground -selectforeground selectForeground -insertbackground insertBackground
+        -disabledforeground disabledForeground -readonlybackground readonlyBackground -selectcolor selectColor
+    }
+    # field colored (instead of bg) classic widget classes
+    set ombFieldClasses {Entry Listbox Canvas Text Spinbox}
+    # not applied yet
+    set ombIsDark ""
+}
+AppearanceInit
+
+proc IsDark {} {
+    global settings
+    switch -- $settings(appearance) {
+        dark {return 1}
+        light {return 0}
+    }
+    # auto: Tk 9.1+ knows the Windows app mode, older Tk is light
+    if {[catch {winfo isdark .} dark]} {
+        return 0
+    }
+    return $dark
+}
+
+proc DarkClassicColor {class opt} {
+    global ombDark ombClassicColors ombFieldClasses
+    set key [dict get $ombClassicColors $opt]
+    if {$opt eq "-background" && $class in $ombFieldClasses} {
+        set key field
+    }
+    return $ombDark($key)
+}
+
+# Classic widgets of the tree under w: dark colors for options at their default, back to the default when light
+proc ClassicWidgetsColors {w dark} {
+    global ombClassicColors
+    set class [winfo class $w]
+    # ttk widget classes are T<Name> (styled by the theme), the menu bar is drawn by Windows
+    set ttk [expr {[string match T* $class] && $class ni {Toplevel Text}}]
+    if {$w ne ".mbar" && !$ttk} {
+        foreach opt [dict keys $ombClassicColors] {
+            if {[catch {$w configure $opt} spec] || [llength $spec] != 5} {
+                continue
+            }
+            lassign $spec - - - default current
+            set darkColor [DarkClassicColor $class $opt]
+            if {$dark && $current eq $default} {
+                $w configure $opt $darkColor
+            } elseif {!$dark && $current eq $darkColor} {
+                $w configure $opt $default
+            }
+        }
+    }
+    foreach c [winfo children $w] {
+        ClassicWidgetsColors $c $dark
+    }
+}
+
+proc ClamDarkTheme {} {
+    global ombDark
+    array set c [array get ombDark]
+    ttk::style theme use clam
+    ttk::style configure . -background $c(bg) -foreground $c(fg) -fieldbackground $c(field) \
+        -bordercolor $c(border) -lightcolor $c(bg) -darkcolor $c(bg) -troughcolor $c(field) \
+        -selectbackground $c(sel) -selectforeground white -insertcolor $c(fg) -focuscolor $c(accent) \
+        -arrowcolor $c(fg)
+    ttk::style map . -foreground [list disabled $c(dis)] -background [list active $c(hover) disabled $c(bg)]
+    ttk::style configure TButton -background $c(field) -lightcolor $c(field) -darkcolor $c(field) -padding {6 2}
+    ttk::style map TButton -background [list pressed $c(sel) active $c(hover)] \
+        -lightcolor [list pressed $c(sel) active $c(hover)] -darkcolor [list pressed $c(sel) active $c(hover)]
+    ttk::style configure TMenubutton -background $c(field) -lightcolor $c(field) -darkcolor $c(field)
+    ttk::style map TMenubutton -background [list active $c(hover)]
+    foreach s {TCheckbutton TRadiobutton} {
+        ttk::style configure $s -indicatorbackground $c(field) -indicatorforeground white -upperbordercolor $c(border) \
+            -lowerbordercolor $c(border)
+        ttk::style map $s -indicatorbackground [list selected $c(sel) active $c(hover)]
+    }
+    ttk::style configure TEntry -lightcolor $c(field) -darkcolor $c(field)
+    ttk::style map TEntry -bordercolor [list focus $c(accent)]
+    ttk::style configure TScale -background $c(slider) -lightcolor $c(slider) -darkcolor $c(slider) \
+        -troughcolor $c(field) -bordercolor $c(border) -gripsize 0 -gripcount 0
+    ttk::style map TScale -background [list active $c(accent)] -lightcolor [list active $c(accent)] \
+        -darkcolor [list active $c(accent)]
+    ttk::style configure TScrollbar -background $c(slider) -lightcolor $c(slider) -darkcolor $c(slider) \
+        -troughcolor $c(bg) -bordercolor $c(bg) -arrowcolor $c(fg) -gripsize 0 -gripcount 0
+    ttk::style configure TLabelframe -bordercolor $c(border)
+}
+
+# Our own ttk styles: they belong to a theme, so again after each theme change
+proc OmbStyles {} {
+    if {[llength [info commands OverlayFontSizes]]} {
+        OverlayFontSizes
+    }
+    ttk::style configure OmbHotkeyFailed.TButton -foreground red
+    if {"WOBBold" in [font names]} {
+        ttk::style configure OmbHotkeyCapture.TButton -font WOBBold
+        ttk::style configure OmbBoldButton.TButton -font WOBBold
+    }
+}
+
+proc TitleBarAppearance {w} {
+    global settings
+    if {[winfo toplevel $w] ne $w || [wm overrideredirect $w]} {
+        return
+    }
+    # Tk 9.1+, auto follows Windows
+    catch {wm attributes $w -appearance $settings(appearance)}
+}
+
+proc AllToplevels {{w .}} {
+    set res {}
+    if {[winfo toplevel $w] eq $w} {
+        lappend res $w
+    }
+    foreach c [winfo children $w] {
+        lappend res {*}[AllToplevels $c]
+    }
+    return $res
+}
+
+proc ApplyAppearance {args} {
+    global ombIsDark ombDark ombClassicColors ombClassicDbNames ombFieldClasses
+    set dark [IsDark]
+    foreach w [AllToplevels] {
+        TitleBarAppearance $w
+    }
+    if {$dark eq $ombIsDark} {
+        return
+    }
+    Debug "Appearance: dark $dark"
+    set ombIsDark $dark
+    if {$dark} {
+        ClamDarkTheme
+        # classic widgets created from now on
+        foreach {opt key} $ombClassicColors {
+            option add *[dict get $ombClassicDbNames $opt] $ombDark($key) widgetDefault
+        }
+        foreach class $ombFieldClasses {
+            option add *$class.background $ombDark(field) widgetDefault
+        }
+    } else {
+        ttk::style theme use vista
+        option clear
+    }
+    OmbStyles
+    ClassicWidgetsColors . $dark
+}
+
+# new windows get the forced light/dark title bar too (once, the script can be sourced again on update)
+if {[string first TitleBarAppearance [bind all <Map>]] < 0} {
+    bind all <Map> {+TitleBarAppearance %W}
+}
+bind . <<AppearanceChanged>> ApplyAppearance
+
 # handle updates from wrong/old binary
 #catch {
 #    package require cffi
@@ -1100,7 +1272,7 @@ proc UISetup {} {
             set rrlabel "broadcast"
         }
         grid [frame .sepRR -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
-        grid [ttk::label .lRR -text "⟳ $RRlabel settings:" -font "*-*-bold" -anchor sw] -padx 4 -columnspan 2 -sticky w
+        grid [ttk::label .lRR -text "⟳ $RRlabel settings:" -font WOBBold -anchor sw] -padx 4 -columnspan 2 -sticky w
         grid [ttk::checkbutton .cbRR -variable rrOn -command RRUpdate] -padx 4 -columnspan 2 -sticky w
         grid [ttk::label .lrrK -text "$RRlabel to other windows all but these keys:"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eRR -textvariable settings(rrKeyListExclude) -width $width] -columnspan 2 -padx 4 -sticky ew
@@ -1128,7 +1300,7 @@ proc UISetup {} {
     }
 
     grid [frame .sep2 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
-    grid [ttk::label .l6 -text "🖰 Mouse settings:" -font "*-*-bold" -anchor sw] -padx 4 -columnspan 2 -sticky w
+    grid [ttk::label .l6 -text "🖰 Mouse settings:" -font WOBBold -anchor sw] -padx 4 -columnspan 2 -sticky w
     grid [ttk::checkbutton .mf -text "Focus follows mouse" -variable mouseFollow -command UpdateMouseFollow] -padx 4 -columnspan 2 -sticky w
     grid [ttk::checkbutton .mbc -text "Broadcast mouse clicks" -variable mouseBroadcast] -padx 4 -columnspan 2 -sticky w
     grid [frame .sep3 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
@@ -1376,6 +1548,10 @@ proc MenuSetup {} {
     $m3 add separator
     $m3 add checkbutton -label "Pause when mouse is outside windows" -variable settings(mouseOutsideWindowsPauses)
     $m3 add checkbutton -label "Focus back when mouse in game window" -variable settings(mouseInsideGameWindowFocuses)
+    $m3 add separator
+    foreach {v label} {auto "Appearance: same as Windows" light "Appearance: light" dark "Appearance: dark"} {
+        $m3 add radiobutton -label $label -value $v -variable settings(appearance) -command "ApplyAppearance; SaveSettings"
+    }
 
     menu .mbar.help -tearoff 0
     .mbar add cascade -label Help -menu .mbar.help
@@ -4544,17 +4720,17 @@ proc OverlayConfig {} {
     grid [ttk::checkbutton $tw.clickable -text "Clickable overlay" -variable settings(overlayClickable) -command "Overlay; SaveSettings"] -padx 8 -pady 2 -columnspan 3
     grid [ttk::checkbutton $tw.bigAll -text "Click to swap all area on windows 2+" -variable settings(overlayAllClickable) -command "Overlay; SaveSettings"] -padx 8 -pady 2 -columnspan 3
     if {$hasRR||$hasBR} {
-        grid [ttk::label $tw.lr1 -text "$RRlabel indicator:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
+        grid [ttk::label $tw.lr1 -text "$RRlabel indicator:" -font WOBBold -anchor w] -columnspan 3 -sticky ew -padx 6
         grid [ttk::label $tw.lr2 -text "Label:" -anchor e] [entry $tw.re1 -width 5 -textvariable settings(rrIndicator,label)] -sticky ew -padx 6
         bind $tw.re1 <Return> "RRUpdate; SaveSettings"
         tooltip $tw.re1 "What is shown when Broadcasting is on"
     }
-    grid [ttk::label $tw.lm1 -text "Mouse Broadcast indicator:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
+    grid [ttk::label $tw.lm1 -text "Mouse Broadcast indicator:" -font WOBBold -anchor w] -columnspan 3 -sticky ew -padx 6
     grid [ttk::label $tw.lm2 -text "Label:" -anchor e] [entry $tw.me1 -width 5 -textvariable settings(mfIndicator,label)] -sticky ew -padx 6
     tooltip $tw.me1 "What is shown when Focus Follow Mouse is on"
     bind $tw.me1 <Return> "AddMouseToRRLabel; SaveSettings"
     if {$hasRR||$hasBR} {
-        grid [ttk::label $tw.lp1 -text "⟳ and 🖰 indicators position:" -font "*-*-bold" -anchor w] -columnspan 3 -sticky ew -padx 6
+        grid [ttk::label $tw.lp1 -text "⟳ and 🖰 indicators position:" -font WOBBold -anchor w] -columnspan 3 -sticky ew -padx 6
     }
     grid [ttk::label $tw.lr3 -text "X:" -anchor e] [entry $tw.re2 -width 5 -textvariable settings(rrIndicator,x)] -sticky ew -padx 6
     bind $tw.re2 <Return> OverlayIndicatorPlace
@@ -6378,6 +6554,7 @@ for {set i 1} {$i<=12} {incr i} {
 }
 
 array set settings {
+    appearance auto
     hk,capture "Ctrl-Shift-C"
     hk,mouseTrack "Ctrl-Shift-Alt-M"
     hk,focusNextWindow "Ctrl-Shift-N"
@@ -6504,6 +6681,7 @@ if {[info exists initProfile]} {
     unset initProfile
     LoadProfile
 }
+ApplyAppearance
 
 
 # -- get/save sequence
