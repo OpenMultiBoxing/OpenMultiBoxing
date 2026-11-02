@@ -1,8 +1,7 @@
 # Publishing a GitHub release (not a prerelease) submits it to the Microsoft Store, with its notes as "What's new";
 # run it from the Actions tab to (re)submit a published release. Certified, then published per Partner Center options.
-# To add screenshots or other listing changes in the same certification: run it with "commit" unchecked, or set the
-# repository variable STORE_NO_COMMIT to true before publishing the release. The submission then stays a draft in
-# Partner Center: make the changes there and submit it.
+# (Screenshots and other listing changes: a separate Partner Center update once it's live. An API submission left
+# uncommitted to edit it in Partner Center doesn't work: its package and notes are only processed on commit.)
 name: Store
 
 on:
@@ -13,10 +12,6 @@ on:
       tag:
         description: Published release tag (vX.Y.Z)
         required: true
-      commit:
-        description: Submit for certification (unchecked = leave the draft in Partner Center)
-        type: boolean
-        default: true
 
 jobs:
   submit:
@@ -33,7 +28,6 @@ jobs:
       - name: Submit to the Microsoft Store
         env:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
-          NO_COMMIT: ${{ (github.event_name == 'workflow_dispatch' && !inputs.commit) || (github.event_name == 'release' && vars.STORE_NO_COMMIT == 'true') }}
           GITHUB_TOKEN: ${{ github.token }}
           TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
           SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
@@ -41,4 +35,4 @@ jobs:
           CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
         run: |
           msstore reconfigure --tenantId $env:TENANT_ID.Trim() --sellerId $env:SELLER_ID.Trim() --clientId $env:CLIENT_ID.Trim() --clientSecret $env:CLIENT_SECRET.Trim()
-          msix\submit.ps1 -Tag $env:TAG -NoCommit:($env:NO_COMMIT -eq 'true')
+          msix\submit.ps1 -Tag $env:TAG

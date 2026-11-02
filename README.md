@@ -63,3 +63,7 @@ See the various `.bat` files for example of launching game windows automatically
 ![OMB Window Layout GUI Screenshot](https://wowopenbox.org/sshotWindowLayout.png?src=github)
 
 Also checkout our [FAQ](https://github.com/OpenMultiBoxing/OpenMultiBoxing/wiki/FAQ)
+
+In dark mode (v11.0.0+, Option menu > Appearance):
+
+![OMB dark mode Screenshot](https://openmultiboxing.org/sshot11_0.png?src=github)

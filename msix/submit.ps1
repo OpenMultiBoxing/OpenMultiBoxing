@@ -1,13 +1,10 @@
 # Microsoft Store submission of a published GitHub release: Store package of its zip's exe, and its notes as the
 # Store's "What's new in this version". msstore must be configured first (msstore reconfigure ...).
-#   msix\submit.ps1 -Tag v1.2.3 [-NotesOnly] [-NoCommit]
+#   msix\submit.ps1 -Tag v1.2.3 [-NotesOnly]
 # -NotesOnly just prints the Store notes of that release.
-# -NoCommit leaves the submission as a draft in Partner Center (to add screenshots... there, then submit it there:
-# one certification for all).
 param(
     [Parameter(Mandatory)][string]$Tag,
-    [switch]$NotesOnly,
-    [switch]$NoCommit
+    [switch]$NotesOnly
 )
 $ErrorActionPreference = 'Stop'
 $repo = 'OpenMultiBoxing/OpenMultiBoxing'
@@ -76,9 +73,5 @@ foreach ($listing in $submission.Listings.PSObject.Properties) {
 }
 msstore submission update $appId ($submission | ConvertTo-Json -Depth 100 -Compress)
 if ($LASTEXITCODE) { throw "msstore submission update failed ($LASTEXITCODE)" }
-if ($NoCommit) {
-    "Left as a draft: finish and submit it in Partner Center"
-    return
-}
 msstore submission publish $appId
 if ($LASTEXITCODE) { throw "msstore submission publish failed ($LASTEXITCODE)" }
