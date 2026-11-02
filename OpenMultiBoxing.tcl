@@ -1119,33 +1119,57 @@ proc SaveSettings {args} {
         }
         set pMode 1
         set pf [ProfileFileName $p]
-        set f [open $pf w+]
-        fconfigure $f -encoding utf-8
-        puts $f "array set settings {"
+        set content "array set settings \{\n"
         foreach i [lsort [array names settings]] {
             if {$i=="profile" || $i=="profiles" || $i=="games" || $i=="lastUpdateChecked" || $i=="profilesNotRotated"} {
                 continue
             }
-            #  Debug "saving $i \"$settings($i)\""
-            puts $f "\t$i\t[list $settings($i)]"
+            append content "\t$i\t[list $settings($i)]\n"
         }
-        puts $f "}"
-        close $f
+        append content "\}\n"
+        if {![WriteSettingsFile $pf $content]} {
+            return
+        }
     }
     Debug "SaveSettings base $SETTINGS_FILE (from cb $args)"
-    if {[catch {open $SETTINGS_FILE w+} f]} {
-        OmbError "Error saving settings" \
-            "Unable to save settings: $f\n\nPlease do not put OpenMultiBoxing*.exe\nin a system/special/protected folder\nput them on your Desktop instead for instance."
-        return
-    }
-    fconfigure $f -encoding utf-8
-    puts $f "array set settings {"
+    set content "array set settings \{\n"
     foreach i [lsort [array names settings]] {
-        #  Debug "saving $i \"$settings($i)\""
-        puts $f "\t$i\t[list $settings($i)]"
+        append content "\t$i\t[list $settings($i)]\n"
     }
-    puts $f "}"
-    close $f
+    append content "\}\n"
+    WriteSettingsFile $SETTINGS_FILE $content
+}
+
+# Writes a settings file: in a temporary file renamed over it, so a refused write doesn't leave it empty.
+# Returns 1 if saved; else reports the error (once per session, settings are saved often) and returns 0.
+proc WriteSettingsFile {path content} {
+    global settingsSaveErrorShown inStore
+    set tmp $path.tmp
+    if {![catch {
+        set f [open $tmp w]
+        fconfigure $f -encoding utf-8
+        puts -nonewline $f $content
+        close $f
+        file rename -force $tmp $path
+    } err]} {
+        return 1
+    }
+    catch {close $f}
+    if {[file isfile $tmp]} {
+        catch {file delete $tmp}
+    }
+    Debug "Saving settings to $path failed: $err"
+    if {[info exists settingsSaveErrorShown]} {
+        return 0
+    }
+    set settingsSaveErrorShown 1
+    set where "Please do not put OpenMultiBoxing*.exe in a system/special/protected folder, put it on your Desktop instead for instance.\n\n"
+    if {[info exists inStore] && $inStore} {
+        set where ""
+    }
+    OmbError "Error saving settings" \
+        "Unable to save the settings to\n[file nativename $path]\n($err)\n\n${where}Most likely Windows Security's \"Controlled folder access\" blocked it: it stops apps it doesn't know from changing files in Documents, Desktop... (Windows shows \"Unauthorized changes blocked\"). To allow OpenMultiBoxing: Windows Security > Virus & threat protection > Protection history, open the \"Protected folder access blocked\" entry, Actions > Allow on device.\n\nUntil then your changes aren't saved (this message is shown once)."
+    return 0
 }
 
 proc LoadProfile {} {
