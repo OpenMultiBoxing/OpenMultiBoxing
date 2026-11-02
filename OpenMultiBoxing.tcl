@@ -13,7 +13,6 @@ package require http
 package require twapi_crypto
 http::register https 443 ::twapi::tls_socket
 package require tooltip
-package require tkdnd
 namespace import tooltip::tooltip
 # tkk native
 ttk::style theme use winnative
@@ -145,6 +144,11 @@ if {![info exists wobInitDone]} {
     Debug "Original app_dir: $app_dir (script [info script])"
     # Normalize appdir in case we're inside the binary
     set inExe [regsub -nocase {/[^/]+\.exe/app$} $app_dir {} app_dir]
+    # Tcl 9 exe: its zip is mounted at //zipfs:/app (and we're in its app/)
+    if {!$inExe && [string match -nocase "//zipfs:/app/*" $app_dir]} {
+        set app_dir [file dirname [file normalize [info nameofexecutable]]]
+        set inExe 1
+    }
     Debug "Post exe detection app_dir: $app_dir"
     set inStore 0
     if {$inExe} {
