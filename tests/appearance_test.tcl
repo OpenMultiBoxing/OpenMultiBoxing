@@ -50,6 +50,8 @@ foreach mb [pack slaves .darkMenuBar] {
 }
 Check "own menu bar menus" $got {File .mbar.file Help .mbar.help}
 Check "alt key opens" [string match "*[lindex [pack slaves .darkMenuBar] end]*" [bind . <Alt-Key-h>]] 1
+Check "own menu posting" [bind [lindex [pack slaves .darkMenuBar] 0] <<Invoke>>] {DarkMenuPost %W; break}
+set darkMenuBrushed(12345) 0
 entry .t.e2
 Check "new entry dark" [list [.t.e2 cget -background] [.t.e2 cget -highlightbackground]] \
     [list $ombDark(field) $ombDark(bg)]
@@ -61,6 +63,7 @@ Check "light" [IsDark] 0
 ApplyAppearance
 Check "light theme" [ttk::style theme use] vista
 Check "native menu bar back" [list [. cget -menu] [winfo exists .darkMenuBar] [bind . <Alt-Key-h>]] {.mbar 0 {}}
+Check "menu backgrounds reset" [array size darkMenuBrushed] 0
 Check "defaults back" [list [.t.e cget -background] [.t.l cget -background] [.t.l cget -foreground]] $defaults
 Check "explicit color still kept" [.t.cx cget -background] gray20
 entry .t.e3

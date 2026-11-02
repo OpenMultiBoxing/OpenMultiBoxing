@@ -158,6 +158,7 @@ proc MenuBarAppearance {} {
     }
     if {$ombIsDark ne "1"} {
         . configure -menu .mbar
+        DarkMenuResetBackgrounds
         return
     }
     . configure -menu {}
@@ -170,10 +171,119 @@ proc MenuBarAppearance {} {
         set mb $bar.m$i
         pack [ttk::menubutton $mb -text $label -menu [.mbar entrycget $i -menu] -style OmbMenuBar.TMenubutton] \
             -side left
+        if {[info procs ::ttk::menubutton::Popdown] ne ""} {
+            bind $mb <Button-1> {DarkMenuPost %W; break}
+            bind $mb <<Invoke>> {DarkMenuPost %W; break}
+        }
         # Alt+first letter opens it, like the native bar
         bind . <Alt-Key-[string tolower [string index $label 0]]> [list event generate $mb <<Invoke>>]
     }
     grid $bar -row 0 -column 0 -columnspan 2 -sticky ew
+}
+
+# The dark bar's menus are popups (Windows menu loop, during which our timers still run). Like the native bar:
+# moving to another bar entry opens its menu instead, and the popup's frame (its background brush) is dark too.
+proc DarkMenuInit {} {
+    global env darkMenuSupport
+    if {[info exists darkMenuSupport]} {
+        return $darkMenuSupport
+    }
+    set darkMenuSupport 0
+    if {[catch {
+        package require cffi
+        package require twapi
+        cffi::Wrapper create ::ombMenuUser32 [file join $env(windir) system32 user32.dll]
+        cffi::Wrapper create ::ombMenuGdi32 [file join $env(windir) system32 gdi32.dll]
+        cffi::Struct create ::OmbMENUINFO {
+            cbSize ulong fMask ulong dwStyle ulong cyMax uint hbrBack ulonglong dwContextHelpID ulong
+            dwMenuData ulonglong
+        }
+        # handles as 64 bit ints (win64 binary)
+        ::ombMenuUser32 stdcall {SendMessageW OmbSendMessage} ulonglong {hwnd ulonglong msg uint w ulonglong l ulonglong}
+        ::ombMenuUser32 stdcall {SetMenuInfo OmbSetMenuInfo} int {hmenu ulonglong mi {struct.OmbMENUINFO byref}}
+        ::ombMenuUser32 stdcall {RedrawWindow OmbRedrawWindow} int {hwnd ulonglong rect ulonglong rgn ulonglong flags uint}
+        ::ombMenuUser32 stdcall {EndMenu OmbEndMenu} int {}
+        ::ombMenuGdi32 stdcall {CreateSolidBrush OmbCreateSolidBrush} ulonglong {color ulong}
+    } err]} {
+        Debug "No dark menu support: $err"
+        return 0
+    }
+    set darkMenuSupport 1
+}
+
+proc DarkMenuPost {mb} {
+    global darkMenuNext darkMenuWatch
+    if {[$mb instate disabled] || [set menu [$mb cget -menu]] eq ""} {
+        return
+    }
+    set darkMenuNext ""
+    $mb state pressed
+    if {[DarkMenuInit]} {
+        set darkMenuWatch [after 1 [list DarkMenuWatch $mb $menu 1]]
+    }
+    # returns once the menu is closed
+    ttk::menubutton::Popdown $mb
+    catch {after cancel $darkMenuWatch}
+    if {[winfo exists $mb]} {
+        $mb state !pressed
+    }
+    if {$darkMenuNext ne "" && [winfo exists $darkMenuNext]} {
+        after idle [list DarkMenuPost $darkMenuNext]
+    }
+}
+
+proc DarkMenuWatch {mb menu first} {
+    global darkMenuNext darkMenuWatch
+    if {![winfo exists $mb]} {
+        return
+    }
+    if {$first} {
+        catch {DarkMenuBackground $menu}
+    }
+    set w [winfo containing {*}[winfo pointerxy $mb]]
+    if {$w ne "" && $w ne $mb && [winfo parent $w] eq [winfo parent $mb] && [winfo class $w] eq "TMenubutton"} {
+        set darkMenuNext $w
+        OmbEndMenu
+        return
+    }
+    set darkMenuWatch [after 50 [list DarkMenuWatch $mb $menu 0]]
+}
+
+# Background brush of the open popup menu (Tk only draws the entries)
+proc DarkMenuBackground {menu} {
+    global darkMenuBrush darkMenuBrushed
+    lassign [winfo rgb $menu [$menu cget -background]] r g b
+    set color [expr {(($b >> 8) << 16) | (($g >> 8) << 8) | ($r >> 8)}]
+    foreach popup [twapi::find_windows -class "#32768" -pids [list [pid]]] {
+        set hwnd [lindex $popup 0]
+        # MN_GETHMENU
+        set hmenu [OmbSendMessage $hwnd 0x1E1 0 0]
+        if {!$hmenu || ([info exists darkMenuBrushed($hmenu)] && $darkMenuBrushed($hmenu) == $color)} {
+            continue
+        }
+        if {![info exists darkMenuBrush($color)]} {
+            set darkMenuBrush($color) [OmbCreateSolidBrush $color]
+        }
+        DarkMenuSetBrush $hmenu $darkMenuBrush($color)
+        set darkMenuBrushed($hmenu) $color
+        # RDW_INVALIDATE RDW_ERASE RDW_FRAME RDW_ALLCHILDREN RDW_UPDATENOW
+        OmbRedrawWindow $hwnd 0 0 0x585
+    }
+}
+
+proc DarkMenuSetBrush {hmenu brush} {
+    # MIM_BACKGROUND | MIM_APPLYTOSUBMENUS
+    OmbSetMenuInfo $hmenu [dict create cbSize [::OmbMENUINFO size] fMask 0x80000002 dwStyle 0 cyMax 0 \
+        hbrBack $brush dwContextHelpID 0 dwMenuData 0]
+}
+
+# Back to the default background (light)
+proc DarkMenuResetBackgrounds {} {
+    global darkMenuBrushed
+    foreach hmenu [array names darkMenuBrushed] {
+        catch {DarkMenuSetBrush $hmenu 0}
+    }
+    array unset darkMenuBrushed
 }
 
 # Our own ttk styles: they belong to a theme, so again after each theme change
