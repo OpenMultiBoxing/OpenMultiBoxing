@@ -228,8 +228,12 @@ proc DarkMenuInit {} {
             cbSize ulong fMask ulong dwStyle ulong cyMax uint hbrBack ulonglong dwContextHelpID ulong
             dwMenuData ulonglong
         }
+        cffi::Struct create ::OmbMENUBARINFO {
+            cbSize ulong left long top long right long bottom long hMenu ulonglong hwndMenu ulonglong flags ulong
+        }
         # handles as 64 bit ints (win64 binary)
-        ::ombMenuUser32 stdcall {SendMessageW OmbSendMessage} ulonglong {hwnd ulonglong msg uint w ulonglong l ulonglong}
+        ::ombMenuUser32 stdcall {GetMenuBarInfo OmbGetMenuBarInfo} int \
+            {hwnd ulonglong idObject long idItem long mbi {struct.OmbMENUBARINFO inout}}
         ::ombMenuUser32 stdcall {SetMenuInfo OmbSetMenuInfo} int {hmenu ulonglong mi {struct.OmbMENUINFO byref}}
         ::ombMenuUser32 stdcall {RedrawWindow OmbRedrawWindow} int {hwnd ulonglong rect ulonglong rgn ulonglong flags uint}
         ::ombMenuUser32 stdcall {GetMenuInfo OmbGetMenuInfo} int {hmenu ulonglong mi {struct.OmbMENUINFO inout}}
@@ -299,8 +303,12 @@ proc DarkMenuBackground {menu} {
     set color [expr {(($b >> 8) << 16) | (($g >> 8) << 8) | ($r >> 8)}]
     foreach popup [twapi::find_windows -class "#32768" -pids [list [pid]]] {
         set hwnd [lindex $popup 0]
-        # MN_GETHMENU
-        set hmenu [OmbSendMessage $hwnd 0x1E1 0 0]
+        # its menu (OBJID_CLIENT of a popup menu window)
+        set mbi [dict create cbSize [::OmbMENUBARINFO size] left 0 top 0 right 0 bottom 0 hMenu 0 hwndMenu 0 flags 0]
+        set hmenu 0
+        if {[OmbGetMenuBarInfo $hwnd -4 0 mbi]} {
+            set hmenu [dict get $mbi hMenu]
+        }
         if {!$hmenu} {
             continue
         }
