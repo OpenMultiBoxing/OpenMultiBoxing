@@ -6875,6 +6875,9 @@ array set hotkeyDefaults [array get settings hk*,*]
 
 
 # globals
+# default appearance (follows Windows) already for the duplicate error
+ApplyAppearance
+AppearanceBindings
 FindOtherCopy
 if {![info exists pos]} {
     # position of the next move window
