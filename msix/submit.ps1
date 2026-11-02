@@ -18,8 +18,10 @@ $appId = '9N0DZ59NL2DW'
 # Release notes markdown -> Store plain text (max 1500 chars), ending with a link to all the releases
 function StoreNotes([string]$body) {
     $lines = foreach ($l in ($body -split "`r?`n")) {
-        # headings, the compare link and the binary reminders (Store users always get the right exe)
-        if ($l -match '^\s*#' -or $l -match '^\*\*Full Changelog\*\*' -or $l -match '^\s*Reminder:') {
+        # headings, the compare link, the binary reminders (Store users always get the right exe) and what's about the
+        # GitHub zip
+        if ($l -match '^\s*#' -or $l -match '^\*\*Full Changelog\*\*' -or $l -match '^\s*(\*\*)?(Reminder:|NEW BINARY)' -or
+            $l -match '\bzip\b') {
             continue
         }
         $l = $l -replace '^\s*[*-]\s+', '• '
