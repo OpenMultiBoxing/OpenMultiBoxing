@@ -14,6 +14,7 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
 
 ## Main features
 
+- **Dark mode** (v11.0.0+, needs its new .exe): Option menu > Appearance: same as Windows (the default, follows it when you change it), light or dark. See the [help](https://OpenMultiBoxing.org/help#appearance-dark-mode).
 - Window Layout wizard and manual tweaking; get your game windows exactly how you want them to be to play.
    - Save different layouts as profiles (File > New Profile...) and cycle through them with the Ctrl-Shift-L (next) and Ctrl-Shift-Alt-L (previous) hotkeys. Pick which profiles are in the rotation with Profile > "Profiles in rotation..." (all but Default by default).
 - Any game or app: pick it in the Game menu or add its window title with Game > "Add game window title..." (use `*` to match a changing part, e.g. a version number in the title).
