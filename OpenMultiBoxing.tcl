@@ -358,13 +358,18 @@ proc OmbStyles {} {
     }
 }
 
-proc TitleBarAppearance {w} {
+proc TitleBarAppearance {w {again 0}} {
     global settings
-    if {[winfo toplevel $w] ne $w || [wm overrideredirect $w]} {
+    # (not on hidden windows: no effect there)
+    if {![winfo exists $w] || [winfo toplevel $w] ne $w || [wm overrideredirect $w] || ![winfo ismapped $w]} {
         return
     }
     # Tk 9.1+, auto follows Windows
     catch {wm attributes $w -appearance $settings(appearance)}
+    if {$again} {
+        # just mapped: sometimes too early for the title bar to show it, set it again a bit later
+        after 100 [list TitleBarAppearance $w]
+    }
 }
 
 proc AllToplevels {{w .}} {
@@ -412,7 +417,7 @@ proc ApplyAppearance {args} {
 proc AppearanceBindings {} {
     # once, the script can be sourced again on update
     if {[string first TitleBarAppearance [bind all <Map>]] < 0} {
-        bind all <Map> {+TitleBarAppearance %W}
+        bind all <Map> {+TitleBarAppearance %W 1}
     }
     bind . <<AppearanceChanged>> ApplyAppearance
 }
