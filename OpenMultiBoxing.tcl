@@ -367,6 +367,7 @@ proc ApplyAppearance {args} {
     OmbStyles
     ClassicWidgetsColors . $dark
     MenuBarAppearance
+    LayoutRecolor
 }
 
 # Once the settings are loaded: new windows get the forced light/dark title bar too, follow Windows changes
@@ -3982,6 +3983,26 @@ proc ConstrainWindow {x1 y1 x2 y2 aspectRatio} {
     return [list $x1 $y1 [expr $x1+$wA] $y2]
 }
 
+# Game windows in the layout: yellow, more orange when stay on top; muted when dark
+proc LayoutWindowColor {pinned} {
+    global ombIsDark
+    if {[info exists ombIsDark] && $ombIsDark eq "1"} {
+        return [lindex {#b8962e #b07d12} $pinned]
+    }
+    lindex {#ffd633 #ffcc00} $pinned
+}
+
+proc LayoutRecolor {} {
+    global sot
+    set c .layout.c
+    if {![winfo exists $c]} {
+        return
+    }
+    foreach id [array names sot] {
+        $c itemconfigure wow$id&&wowWindow -fill [LayoutWindowColor $sot($id)]
+    }
+}
+
 proc SetWindowOnCanvas {id x1 y1 x2 y2} {
     global sot stayOnTop settings
     set c .layout.c
@@ -3993,7 +4014,7 @@ proc SetWindowOnCanvas {id x1 y1 x2 y2} {
     lappend tags "wowWindow"
     set w [expr {$x2-$x1}]
     set h [expr {$y2-$y1}]
-    $c create rectangle $x1 $y1 $x2 $y2 -fill #ffd633 -tags $tags
+    $c create rectangle $x1 $y1 $x2 $y2 -fill [LayoutWindowColor 0] -tags $tags
     set pin ""
     set hasPin $stayOnTop
     if {[info exists settings($id,stayOnTop)]} {
@@ -4002,10 +4023,10 @@ proc SetWindowOnCanvas {id x1 y1 x2 y2} {
     if {$hasPin} {
         set pin "📌"
         set sot($id) 1
-        after idle "$c raise $tag; $c raise mirrorShape; $c itemconfigure $tag&&wowWindow -fill #ffcc00"
+        after idle "$c raise $tag; $c raise mirrorShape; $c itemconfigure $tag&&wowWindow -fill [LayoutWindowColor 1]"
     } else {
         set sot($id) 0
-        after idle "$c itemconfigure $tag&&wowWindow -fill #ffd633"
+        after idle "$c itemconfigure $tag&&wowWindow -fill [LayoutWindowColor 0]"
     }
     $c create text $x1 $y1 -text "\n   ${pin}OMB $id${pin}\n   $w x $h" -anchor "nw" -tags $txtTags
     Debug "Window $id $x1,$y1 $x2,$y2 ($tags)"
@@ -4076,9 +4097,9 @@ proc UpdateWindowText {tag w h} {
     set pin ""
     if {$sot($id)} {
         set pin "📌"
-        after idle "$c raise $tag; $c raise mirrorShape; $c itemconfigure $tag&&wowWindow -fill #ffcc00"
+        after idle "$c raise $tag; $c raise mirrorShape; $c itemconfigure $tag&&wowWindow -fill [LayoutWindowColor 1]"
     } else {
-        after idle "$c itemconfigure $tag&&wowWindow -fill #ffd633"
+        after idle "$c itemconfigure $tag&&wowWindow -fill [LayoutWindowColor 0]"
     }
     $c itemconfigure $t -text "\n   ${pin}OMB $id${pin}\n   $w x $h"
 }
