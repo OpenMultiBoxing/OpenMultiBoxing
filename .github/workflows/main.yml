@@ -52,7 +52,7 @@ jobs:
           cd buildkit
           cp ..\OpenMultiBoxing.tcl OpenMultiBoxing.vfs\app\
           .\build.ps1 -Out OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe -Version ${{ steps.get_version.outputs.VERSION }} -Assets ..\msix\Assets
-          Compress-Archive -Path OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe,..\README.txt,..\*.bat -DestinationPath OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.zip
+          Compress-Archive -Path OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe,..\README.txt,..\*.bat,..\testinput.ps1 -DestinationPath OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.zip
       # before any release is made: the tests with the new exe
       - name: Tests
         run: OMB_EXE=buildkit/OpenMultiBoxing-${{ steps.get_version.outputs.VERSION }}.exe bash tests/run.sh
