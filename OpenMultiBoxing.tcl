@@ -5122,6 +5122,13 @@ proc ResetOverlay {} {
 }
 
 set rrOnLabel ""
+# WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW on toplevel t: showing or clicking it doesn't take the activation
+proc NoActivate {t} {
+    set wh [list [expr {[wm frame $t]}] HWND]
+    lassign [twapi::get_window_style $wh] style exstyle
+    twapi::set_window_style $wh $style [expr {$exstyle | 0x08000080}]
+}
+
 proc Overlay {} {
     global settings rrOnLabel
     set transparentcolor [OverlayFontSizes]
@@ -5142,8 +5149,13 @@ proc Overlay {} {
         set t .o$i
         if {![winfo exists $t]} {
             toplevel $t -bd 2 -relief $relief
+            # never activated (Tk 9 activates an overrideredirect window when it's shown: the main window then went
+            # under the app OMB was started from): style set while still hidden
+            wm withdraw $t
             wm overrideredirect $t 1
             wm attributes $t -alpha $settings(overlayAlpha) -topmost 1 -transparentcolor $transparentcolor
+            update idletasks
+            NoActivate $t
             $t configure -bg $transparentcolor
             ttk::label $t.l -text "$i" -style OmbOverlayText.Label -anchor $settings(overlayAnchor)
             if {$i==1} {
@@ -6039,6 +6051,8 @@ proc MirrorCreate {i} {
     if {![winfo exists $t]} {
         # background shows as a border in edit mode
         toplevel $t -background $settings(overlayFocusColor) -cursor fleur
+        # hidden until MirrorClickThrough made it non activating (MirrorRefresh shows it)
+        wm withdraw $t
         wm overrideredirect $t 1
         wm attributes $t -alpha 0.99
         # edit mode, else (mouse to the window mirrors) forwarded to the source window
@@ -6265,6 +6279,8 @@ proc LayoutMirrorsRefresh {} {
         }
         if {![winfo exists $t]} {
             toplevel $t -background black -cursor hand2
+            # hidden until made non activating (shown below)
+            wm withdraw $t
             wm overrideredirect $t 1
             wm attributes $t -alpha 0.99
             bind $t <ButtonPress-1> [list LayoutMirrorClick $p %x %y]
@@ -7058,7 +7074,8 @@ if {$forceDebug && ![catch {console eval {winfo exists .}}]} {
     catch {console eval {bind . <Configure> {consoleinterp eval [list set settings(consoleGeometry) [wm geometry .]]}}}
 }
 
-Defer 150 {raise .}
+# in front and active, like any app just started
+Defer 150 {raise .; focus -force .}
 if {$settings(numWindows)==0} {
     Debug "No layout setup, opening layout"
     Defer 250 {.bwl invoke}
