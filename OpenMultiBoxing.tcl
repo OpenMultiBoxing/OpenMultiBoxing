@@ -18,7 +18,7 @@ namespace import tooltip::tooltip
 ttk::style theme use vista
 
 # -- Appearance: native "vista" ttk theme when light, our palette on "clam" when dark.
-# settings(appearance): auto (follows the Windows app mode, Tk 9.1+), light or dark
+# settings(appearance): auto (follows the Windows app mode, live with Tk 9.1+), light or dark
 proc AppearanceInit {} {
     global ombDark ombClassicColors ombClassicDbNames ombFieldClasses ombIsDark
     array set ombDark {
@@ -47,15 +47,26 @@ AppearanceInit
 
 proc IsDark {} {
     global settings
-    switch -- $settings(appearance) {
+    # settings not loaded yet (<<AppearanceChanged>> can come early): auto
+    set mode auto
+    catch {set mode $settings(appearance)}
+    switch -- $mode {
         dark {return 1}
         light {return 0}
     }
-    # auto: Tk 9.1+ knows the Windows app mode, older Tk is light
-    if {[catch {winfo isdark .} dark]} {
+    return [WindowsAppsDark]
+}
+
+# The Windows app mode (Settings > Personalization > Colors), from the registry like Tk 9.1's `winfo isdark`,
+# which crashes (Tk 9.1.0) for a window not shown yet, like our main window at startup
+proc WindowsAppsDark {} {
+    if {[catch {
+        package require registry
+        registry get {HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize} AppsUseLightTheme
+    } light]} {
         return 0
     }
-    return $dark
+    expr {$light == 0}
 }
 
 proc DarkClassicColor {class opt} {

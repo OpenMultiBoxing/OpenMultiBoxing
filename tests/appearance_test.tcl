@@ -14,6 +14,17 @@ canvas .t.cx -background gray20
 label .t.l
 set defaults [list [.t.e cget -background] [.t.l cget -background] [.t.l cget -foreground]]
 
+# auto: the Windows app mode (registry), also before the settings are loaded
+Check "windows mode is a boolean" [string is boolean -strict [WindowsAppsDark]] 1
+rename WindowsAppsDark WindowsAppsDarkOrig
+proc WindowsAppsDark {} {return 1}
+Check "no setting yet: auto" [IsDark] 1
+set settings(appearance) auto
+proc WindowsAppsDark {} {return 0}
+Check "auto light" [IsDark] 0
+rename WindowsAppsDark {}
+rename WindowsAppsDarkOrig WindowsAppsDark
+
 set settings(appearance) dark
 Check "dark" [IsDark] 1
 ApplyAppearance
