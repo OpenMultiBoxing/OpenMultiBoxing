@@ -7,6 +7,36 @@
 #
 #  Releases detail/changes are on https://github.com/OpenMultiBoxing/OpenMultiBoxing/releases
 #
+# This script needs the Tcl/Tk 9 .exe. An older .exe runs it after an update or when it's next to it: tell the user
+# to get the new .exe, set the file aside (and restore the previous one), and keep running the old version.
+if {![package vsatisfies [package provide Tcl] 9-]} {
+    # sourced by CheckForUpdates (same detection as further below)
+    set ombUpdateFrame {}
+    catch {set ombUpdateFrame [info frame -1]}
+    apply {{caller} {
+        set script [file normalize [info script]]
+        set update [expr {[dict exists $caller proc] && [dict get $caller proc] eq "::CheckForUpdates"}]
+        catch {file rename -force $script $script.needs-new-exe}
+        set backups [glob -nocomplain $script.*.bak]
+        if {[llength $backups] == 1} {
+            catch {file rename [lindex $backups 0] $script}
+        }
+        set ans [tk_messageBox -type yesno -icon warning -title "OpenMultiBoxing: new .exe needed" \
+            -message "This OpenMultiBoxing update needs the new OpenMultiBoxing .exe (Tcl/Tk 9).\n\nDownload and extract the latest OpenMultiBoxing zip (Help menu: Get the newest binary release), your current version keeps running until then.\n\nOpen the download page now?"]
+        if {$ans eq "yes"} {
+            catch {twapi::shell_execute -path https://github.com/OpenMultiBoxing/OpenMultiBoxing/releases/latest}
+        }
+        if {!$update} {
+            # started with this file next to the exe: run the exe's own (or the restored) script instead
+            set own [file join [info nameofexecutable] app [file tail $script]]
+            if {[file readable $script]} {
+                set own $script
+            }
+            uplevel #0 [list source -encoding utf-8 $own]
+        }
+    }} $ombUpdateFrame
+    return
+}
 package require Tk
 package require twapi
 package require http
