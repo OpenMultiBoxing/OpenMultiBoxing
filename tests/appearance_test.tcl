@@ -14,6 +14,12 @@ canvas .t.c
 canvas .t.cx -background gray20
 label .t.l
 set defaults [list [.t.e cget -background] [.t.l cget -background] [.t.l cget -foreground]]
+menu .mbar -type menubar
+. configure -menu .mbar
+foreach {name label} {file File help Help} {
+    menu .mbar.$name -tearoff 0
+    .mbar add cascade -label $label -menu .mbar.$name
+}
 
 # auto: the Windows app mode (registry), also before the settings are loaded
 Check "windows mode is a boolean" [string is boolean -strict [WindowsAppsDark]] 1
@@ -37,6 +43,13 @@ Check "explicit color kept" [.t.cx cget -background] gray20
 Check "label colors" [list [.t.l cget -background] [.t.l cget -foreground]] [list $ombDark(bg) $ombDark(fg)]
 Check "label highlight" [.t.l cget -highlightbackground] $ombDark(bg)
 Check "our styles again" $overlayStyles 1
+Check "own menu bar" [list [. cget -menu] [winfo exists .darkMenuBar] [llength [winfo children .darkMenuBar]]] {{} 1 2}
+set got {}
+foreach mb [pack slaves .darkMenuBar] {
+    lappend got [$mb cget -text] [$mb cget -menu]
+}
+Check "own menu bar menus" $got {File .mbar.file Help .mbar.help}
+Check "alt key opens" [string match "*[lindex [pack slaves .darkMenuBar] end]*" [bind . <Alt-Key-h>]] 1
 entry .t.e2
 Check "new entry dark" [list [.t.e2 cget -background] [.t.e2 cget -highlightbackground]] \
     [list $ombDark(field) $ombDark(bg)]
@@ -47,6 +60,7 @@ set settings(appearance) light
 Check "light" [IsDark] 0
 ApplyAppearance
 Check "light theme" [ttk::style theme use] vista
+Check "native menu bar back" [list [. cget -menu] [winfo exists .darkMenuBar] [bind . <Alt-Key-h>]] {.mbar 0 {}}
 Check "defaults back" [list [.t.e cget -background] [.t.l cget -background] [.t.l cget -foreground]] $defaults
 Check "explicit color still kept" [.t.cx cget -background] gray20
 entry .t.e3

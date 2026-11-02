@@ -131,6 +131,49 @@ proc ClamDarkTheme {} {
     ttk::style configure TScrollbar -background $c(slider) -lightcolor $c(slider) -darkcolor $c(slider) \
         -troughcolor $c(bg) -bordercolor $c(bg) -arrowcolor $c(fg) -gripsize 0 -gripcount 0
     ttk::style configure TLabelframe -bordercolor $c(border)
+    # flat menu bar (MenuBarAppearance)
+    ttk::style layout OmbMenuBar.TMenubutton {
+        Menubutton.border -sticky nswe -children {Menubutton.padding -sticky nswe -children {Menubutton.label}}
+    }
+    ttk::style configure OmbMenuBar.TMenubutton -background $c(bg) -lightcolor $c(bg) -darkcolor $c(bg) \
+        -bordercolor $c(bg) -relief flat -padding {8 3} -width 0
+    ttk::style map OmbMenuBar.TMenubutton -background [list pressed $c(sel) active $c(hover)] \
+        -lightcolor [list pressed $c(sel) active $c(hover)] -darkcolor [list pressed $c(sel) active $c(hover)] \
+        -bordercolor [list pressed $c(sel) active $c(hover)]
+    ttk::style configure OmbMenuBar.TFrame -background $c(bg)
+}
+
+# Windows draws the native menu bar light only: when dark, our own bar (row 0 of the main window) with the same menus
+proc MenuBarAppearance {} {
+    global ombIsDark
+    if {![winfo exists .mbar]} {
+        return
+    }
+    set bar .darkMenuBar
+    catch {destroy $bar}
+    foreach b [bind .] {
+        if {[string match "<Alt-Key-*>" $b] && [string match "*$bar*" [bind . $b]]} {
+            bind . $b {}
+        }
+    }
+    if {$ombIsDark ne "1"} {
+        . configure -menu .mbar
+        return
+    }
+    . configure -menu {}
+    ttk::frame $bar -style OmbMenuBar.TFrame
+    for {set i 0} {$i <= [.mbar index end]} {incr i} {
+        if {[.mbar type $i] ne "cascade"} {
+            continue
+        }
+        set label [.mbar entrycget $i -label]
+        set mb $bar.m$i
+        pack [ttk::menubutton $mb -text $label -menu [.mbar entrycget $i -menu] -style OmbMenuBar.TMenubutton] \
+            -side left
+        # Alt+first letter opens it, like the native bar
+        bind . <Alt-Key-[string tolower [string index $label 0]]> [list event generate $mb <<Invoke>>]
+    }
+    grid $bar -row 0 -column 0 -columnspan 2 -sticky ew
 }
 
 # Our own ttk styles: they belong to a theme, so again after each theme change
@@ -192,6 +235,7 @@ proc ApplyAppearance {args} {
     }
     OmbStyles
     ClassicWidgetsColors . $dark
+    MenuBarAppearance
 }
 
 # Once the settings are loaded: new windows get the forced light/dark title bar too, follow Windows changes
@@ -1246,22 +1290,22 @@ proc UISetup {} {
          mouseFollow mouseRaise mouseDelay ourTitle bottomText \
          rrOn hasRR hasBR RRlabel rrlabel mouseBroadcast
     wm title . $ourTitle
-    # Get logo
+    # Get logo (row 0 is for the dark mode menu bar, MenuBarAppearance)
     set err [GetLogo]
     if {$err != ""} {
         set txt "Opensource\nMulti\nBoxing"
-        grid [ttk::label .logo -text $txt] -row 0 -column 0 -rowspan 3
+        grid [ttk::label .logo -text $txt] -row 1 -column 0 -rowspan 3
     } else {
-        grid [ttk::label .logo] -row 0 -column 0 -rowspan 3 -pady 6 -padx 12
+        grid [ttk::label .logo] -row 1 -column 0 -rowspan 3 -pady 6 -padx 12
         .logo configure -image $imgOMB70
         wm iconphoto . -default $imgOMB70
     }
     set labelW 18
-    grid [ttk::button .bH -text "Help" -width $labelW -command Help]  -row 0 -column 1 -padx 4
+    grid [ttk::button .bH -text "Help" -width $labelW -command Help]  -row 1 -column 1 -padx 4
     tooltip .bH "Opens online help page"
-    grid [ttk::button .bwl -text "Window Layout" -width $labelW -command WindowLayout] -row 1 -column 1
+    grid [ttk::button .bwl -text "Window Layout" -width $labelW -command WindowLayout] -row 2 -column 1
     tooltip .bwl "View or change the Window Layout"
-    grid [ttk::button .b1  -text "Edit Settings" -width $labelW -command EditSettings] -row 2 -column 1
+    grid [ttk::button .b1  -text "Edit Settings" -width $labelW -command EditSettings] -row 3 -column 1
     tooltip .b1 "Opens the editor to edit raw settings\nand reload them after save.\nHotkeys are changed with File > Hotkeys..."
     # label width - enough to fit "-9999 -9999"
     set width 10
@@ -1333,7 +1377,8 @@ proc UISetup {} {
     grid [ttk::label .l_bottom -textvariable bottomText -justify center -anchor c] -padx 2 -columnspan 2
     bind .l_bottom <ButtonPress> [list CheckForUpdates 0]
     tooltip .l_bottom "Click to check for update from $vers"
-    grid rowconfigure . 9 -weight 1
+    # the captured windows list
+    grid rowconfigure . 10 -weight 1
     grid columnconfigure . 1 -weight 1
     UpdateHotkeyTexts
 }
@@ -1577,6 +1622,7 @@ proc MenuSetup {} {
     .mbar.help add command -label "Get the newest binary release..." -command Releases
     .mbar.help add command -label "Check for update" -command [list CheckForUpdates 0]
     .mbar.help add command -label About -command About
+    MenuBarAppearance
  }
 
 proc MouseBroadcast {} {
