@@ -202,6 +202,7 @@ proc DarkMenuInit {} {
         ::ombMenuUser32 stdcall {SendMessageW OmbSendMessage} ulonglong {hwnd ulonglong msg uint w ulonglong l ulonglong}
         ::ombMenuUser32 stdcall {SetMenuInfo OmbSetMenuInfo} int {hmenu ulonglong mi {struct.OmbMENUINFO byref}}
         ::ombMenuUser32 stdcall {RedrawWindow OmbRedrawWindow} int {hwnd ulonglong rect ulonglong rgn ulonglong flags uint}
+        ::ombMenuUser32 stdcall {GetMenuInfo OmbGetMenuInfo} int {hmenu ulonglong mi {struct.OmbMENUINFO inout}}
         ::ombMenuUser32 stdcall {EndMenu OmbEndMenu} int {}
         ::ombMenuGdi32 stdcall {CreateSolidBrush OmbCreateSolidBrush} ulonglong {color ulong}
     } err]} {
@@ -232,6 +233,18 @@ proc DarkMenuPost {mb} {
     }
 }
 
+# Context menus: tk_popup with the dark frame too
+proc OmbPopup {menu x y} {
+    global ombIsDark
+    set id ""
+    if {$ombIsDark eq "1" && [DarkMenuInit]} {
+        set id [after 1 [list catch [list DarkMenuBackground $menu]]]
+    }
+    # returns once the menu is closed
+    tk_popup $menu $x $y
+    after cancel $id
+}
+
 proc DarkMenuWatch {mb menu first} {
     global darkMenuNext darkMenuWatch
     if {![winfo exists $mb]} {
@@ -258,14 +271,20 @@ proc DarkMenuBackground {menu} {
         set hwnd [lindex $popup 0]
         # MN_GETHMENU
         set hmenu [OmbSendMessage $hwnd 0x1E1 0 0]
-        if {!$hmenu || ([info exists darkMenuBrushed($hmenu)] && $darkMenuBrushed($hmenu) == $color)} {
+        if {!$hmenu} {
             continue
         }
         if {![info exists darkMenuBrush($color)]} {
             set darkMenuBrush($color) [OmbCreateSolidBrush $color]
         }
+        # for the reset to light: by menu path, so recreated menus don't add up
+        set darkMenuBrushed($menu) $hmenu
+        set mi [dict create cbSize [::OmbMENUINFO size] fMask 2 dwStyle 0 cyMax 0 hbrBack 0 dwContextHelpID 0 \
+            dwMenuData 0]
+        if {[OmbGetMenuInfo $hmenu mi] && [dict get $mi hbrBack] == $darkMenuBrush($color)} {
+            continue
+        }
         DarkMenuSetBrush $hmenu $darkMenuBrush($color)
-        set darkMenuBrushed($hmenu) $color
         # RDW_INVALIDATE RDW_ERASE RDW_FRAME RDW_ALLCHILDREN RDW_UPDATENOW
         OmbRedrawWindow $hwnd 0 0 0x585
     }
@@ -280,8 +299,10 @@ proc DarkMenuSetBrush {hmenu brush} {
 # Back to the default background (light)
 proc DarkMenuResetBackgrounds {} {
     global darkMenuBrushed
-    foreach hmenu [array names darkMenuBrushed] {
-        catch {DarkMenuSetBrush $hmenu 0}
+    foreach {menu hmenu} [array get darkMenuBrushed] {
+        if {[winfo exists $menu]} {
+            catch {DarkMenuSetBrush $hmenu 0}
+        }
     }
     array unset darkMenuBrushed
 }
@@ -411,12 +432,22 @@ proc EnableDisableWindows {enable} {
 }
 
 
+# Windows' message box is always light: when dark, Tk's own (ttk, so our dark theme)
+proc MessageBox {args} {
+    global ombIsDark
+    if {[info exists ombIsDark] && $ombIsDark eq "1" && ([info procs ::tk::MessageBox] ne ""
+            || [auto_load ::tk::MessageBox])} {
+        return [::tk::MessageBox {*}$args]
+    }
+    tk_messageBox {*}$args
+}
+
 proc OmbMessage {args} {
     global hotkeyOk
     set hotkeyOk 0
     Debug "OMB message $args"
     EnableDisableWindows 0
-    set ret [tk_messageBox {*}$args]
+    set ret [MessageBox {*}$args]
     EnableDisableWindows 1
     set hotkeyOk 1
     return $ret
@@ -637,6 +668,8 @@ proc Connect {} {
     ttk::button $t.ok -text OK -command {set doneDialog 1}
     ttk::button $t.cancel -text Cancel -command "set connectTo {}; set doneDialog 1"
     bind $t.e <Escape> "$t.cancel invoke"
+    # closing the window cancels (else waits forever with the main window busy)
+    wm protocol $t WM_DELETE_WINDOW "$t.cancel invoke"
     grid $t.l - -sticky news -padx 4 -pady 4
     grid $t.e - -sticky news -padx 4 -pady 4
     grid $t.ok $t.cancel -padx 4 -pady 4
@@ -894,6 +927,8 @@ proc NewProfile {} {
     ttk::button $t.ok -text OK -command {set doneDialog 1}
     ttk::button $t.cancel -text Cancel -command "set profileName {}; set doneDialog 1"
     bind $t.e <Escape> "$t.cancel invoke"
+    # closing the window cancels (else waits forever with the main window busy)
+    wm protocol $t WM_DELETE_WINDOW "$t.cancel invoke"
     grid $t.l - -sticky news -padx 4 -pady 4
     grid $t.e - -sticky news -padx 4 -pady 4
     grid $t.ok $t.cancel -padx 4 -pady 4
@@ -966,6 +1001,8 @@ proc AddGameDialog {} {
     ttk::button $t.ok -text OK -command {set doneDialog 1}
     ttk::button $t.cancel -text Cancel -command "set gameTitle {}; set doneDialog 1"
     bind $t.e <Escape> "$t.cancel invoke"
+    # closing the window cancels (else waits forever with the main window busy)
+    wm protocol $t WM_DELETE_WINDOW "$t.cancel invoke"
     grid $t.l - -sticky nws -padx 4 -pady 4
     grid $t.e - -sticky news -padx 4 -pady 4
     grid $t.h - -sticky nws -padx 4 -pady 4
@@ -2282,7 +2319,7 @@ proc ContextMenu {n x y} {
     catch {destroy .ctx}
     menu .ctx -tearoff 0
     .ctx add command -label "Forget OMB $n..." -command [list Forget $n]
-    tk_popup .ctx $x $y
+    OmbPopup .ctx $x $y
 }
 
 proc Forget {n} {
@@ -6494,7 +6531,7 @@ proc MirrorMenu {i x y} {
     $mn add separator
     $mn add command -label "Delete" -command [list MirrorDelete $i]
     $mn add command -label "Done editing" -command {MirrorsEdit 0}
-    tk_popup $mn $x $y
+    OmbPopup $mn $x $y
 }
 
 proc MirrorChangeSource {i} {

@@ -51,7 +51,7 @@ foreach mb [pack slaves .darkMenuBar] {
 Check "own menu bar menus" $got {File .mbar.file Help .mbar.help}
 Check "alt key opens" [string match "*[lindex [pack slaves .darkMenuBar] end]*" [bind . <Alt-Key-h>]] 1
 Check "own menu posting" [bind [lindex [pack slaves .darkMenuBar] 0] <<Invoke>>] {DarkMenuPost %W; break}
-set darkMenuBrushed(12345) 0
+set darkMenuBrushed(.mbar.file) 0
 entry .t.e2
 Check "new entry dark" [list [.t.e2 cget -background] [.t.e2 cget -highlightbackground]] \
     [list $ombDark(field) $ombDark(bg)]
