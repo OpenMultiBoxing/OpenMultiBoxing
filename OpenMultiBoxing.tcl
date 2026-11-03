@@ -5832,6 +5832,7 @@ proc UpdateMouseDelay {} {
 #   geom: {x y w h} of the mirror on screen
 #   top: stay on top
 #   clicks: optional, see MirrorClicks
+#   opacity: optional percentage, see MirrorAlpha
 if {![info exists mirrorEdit]} {
     set mirrorEdit 0
 }
@@ -6025,6 +6026,21 @@ proc MirrorClicks {i} {
     return 0
 }
 
+# Mirror i opacity percentage (100 if not set)
+proc MirrorOpacity {i} {
+    global settings
+    set m [lindex $settings(mirrors) $i]
+    if {[dict exists $m opacity] && [string is integer -strict [dict get $m opacity]]} {
+        return [expr {max(10, min(100, [dict get $m opacity]))}]
+    }
+    return 100
+}
+
+# Window alpha for mirror i: never 1.0, Tk then drops WS_EX_LAYERED which click through needs
+proc MirrorAlpha {i} {
+    expr {min(0.99, [MirrorOpacity $i]/100.)}
+}
+
 # Whether mirror i lets clicks through (never errors: reached from UpdateN)
 proc MirrorPassThrough {i} {
     global mirrorEdit
@@ -6054,7 +6070,6 @@ proc MirrorCreate {i} {
         # hidden until MirrorClickThrough made it non activating (MirrorRefresh shows it)
         wm withdraw $t
         wm overrideredirect $t 1
-        wm attributes $t -alpha 0.99
         # edit mode, else (mouse to the window mirrors) forwarded to the source window
         bind $t <ButtonPress> [list MirrorPress $i %b %s %x %y %X %Y]
         bind $t <ButtonRelease> [list MirrorRelease $i %b %s %x %y]
@@ -6062,7 +6077,7 @@ proc MirrorCreate {i} {
         bind $t <MouseWheel> [list MirrorWheel $i %D %s %X %Y]
     }
     $t configure -cursor [expr {$mirrorEdit ? "fleur" : "arrow"}]
-    wm attributes $t -topmost [dict get $m top]
+    wm attributes $t -topmost [dict get $m top] -alpha [MirrorAlpha $i]
     wm geometry $t ${w}x$h+$x+$y
     update idletasks
     MirrorClickThrough $t [MirrorPassThrough $i]
@@ -6606,7 +6621,7 @@ proc MirrorZoom {i delta} {
 }
 
 proc MirrorMenu {i x y} {
-    global settings mirrorMenuSource mirrorMenuTop mirrorMenuClicks
+    global settings mirrorMenuSource mirrorMenuTop mirrorMenuClicks mirrorMenuOpacity
     set mn .mirrorMenu
     destroy $mn
     menu $mn -tearoff 0
@@ -6624,6 +6639,12 @@ proc MirrorMenu {i x y} {
         $mn.zoom add command -label "${z}x" -command [list MirrorSetZoom $i $z]
     }
     $mn add cascade -label $label -menu $mn.zoom
+    set mirrorMenuOpacity [MirrorOpacity $i]
+    menu $mn.opacity -tearoff 0
+    foreach o {100 90 80 70 60 50 40 30} {
+        $mn.opacity add radiobutton -label "$o%" -value $o -variable mirrorMenuOpacity -command [list MirrorChangeOpacity $i]
+    }
+    $mn add cascade -label "Opacity (now $mirrorMenuOpacity%)" -menu $mn.opacity
     $mn add checkbutton -label "Stay on top" -variable mirrorMenuTop -command [list MirrorChangeTop $i]
     $mn add separator
     set mirrorMenuClicks [MirrorClicks $i]
@@ -6649,6 +6670,13 @@ proc MirrorChangeTop {i} {
     global mirrorMenuTop
     MirrorSet $i top $mirrorMenuTop
     wm attributes .mirror$i -topmost $mirrorMenuTop
+    MirrorSaveSoon
+}
+
+proc MirrorChangeOpacity {i} {
+    global mirrorMenuOpacity
+    MirrorSet $i opacity $mirrorMenuOpacity
+    wm attributes .mirror$i -alpha [MirrorAlpha $i]
     MirrorSaveSoon
 }
 

@@ -124,6 +124,14 @@ set settings(mirrors) [list [dict create source 1 area {0 0 1 1} geom {0 0 10 10
 set mirrorEdit 0
 Check "clicks default" [list [MirrorClicks 0] [MirrorPassThrough 0]] {0 1}
 Check "clicks on" [list [MirrorClicks 1] [MirrorPassThrough 1]] {1 0}
+# opacity setting: missing means opaque, alpha stays below 1.0 (layered for click through)
+lappend settings(mirrors) [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1 opacity 60] \
+    [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1 opacity 0] \
+    [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1 opacity bad]
+Check "opacity default" [list [MirrorOpacity 0] [MirrorAlpha 0]] {100 0.99}
+Check "opacity set" [list [MirrorOpacity 2] [MirrorAlpha 2]] {60 0.6}
+Check "opacity clamped" [MirrorOpacity 3] 10
+Check "opacity invalid" [MirrorOpacity 4] 100
 Check "key state none" [MirrorKeyState 0] 0
 Check "key state left+shift" [MirrorKeyState [expr {0x100|0x1}]] 5
 Check "key state right+middle+control" [MirrorKeyState [expr {0x400|0x200|0x4}]] [expr {0x02|0x10|0x08}]
