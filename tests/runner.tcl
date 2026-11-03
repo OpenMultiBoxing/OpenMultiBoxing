@@ -16,6 +16,11 @@ proc puts {args} {
     }
 }
 set testFailures 0
+# the apps need the Tcl/Tk 9 binary (older ones would skip the Tk 9 code paths, e.g. dark mode)
+if {![package vsatisfies [info patchlevel] 9]} {
+    puts "FAIL: [file tail [info nameofexecutable]] is Tcl [info patchlevel], not 9"
+    ::tcl::exit_orig 1
+}
 if {[catch {source -encoding utf-8 $env(OMB_TEST_SCRIPT)} err]} {
     puts "FAIL: error $err\n$errorInfo"
     incr testFailures
