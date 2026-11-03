@@ -144,6 +144,58 @@ Check "opacity set" [list [MirrorOpacity 1] [MirrorAlpha 1]] {60 0.6}
 Check "opacity clamped" [MirrorOpacity 2] 10
 Check "opacity invalid" [MirrorOpacity 3] 100
 
+# focus option: a click, or focus follows mouse, activates the mirror, which gives the focus to its
+# source window (default: on in WOB, off in OMB)
+set settings(mirrors) [list [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1] \
+    [dict create source 2 area {0 0 1 1} geom {0 0 10 10} top 1 focus 1] \
+    [dict create source main area {0 0 1 1} geom {0 0 10 10} top 1 focus 0]]
+Check "focus default" [MirrorFocuses 0] [string match *WowOpenBox* $env(OMB_TEST_APP)]
+Check "focus on/off" [list [MirrorFocuses 1] [MirrorFocuses 2]] {1 0}
+set mirrorEdit 0
+Check "focus mirror catches the mouse" [list [MirrorPassThrough 1] [MirrorActivates 1]] {0 1}
+Check "other mirror lets it through" [list [MirrorPassThrough 2] [MirrorActivates 2]] {1 0}
+set mirrorEdit 1
+Check "edit mode not activating" [list [MirrorPassThrough 1] [MirrorActivates 1]] {0 0}
+set mirrorEdit 0
+lset settings(mirrors) 0 [dict create source 3 area {0 0 1 1} geom {0 0 10 10} top 1 focus 1]
+foreach {i geom} {0 100x50+300+300 1 100x50+500+300 2 100x50+700+300} {
+    toplevel .mirror$i
+    wm overrideredirect .mirror$i 1
+    wm geometry .mirror$i $geom
+}
+update
+proc ExStyleBits {t} {
+    lassign [twapi::get_window_style [list [expr {[wm frame $t]}] HWND]] style ex
+    # WS_EX_NOACTIVATE, WS_EX_TRANSPARENT
+    list [expr {($ex & 0x08000000) != 0}] [expr {($ex & 0x20) != 0}]
+}
+MirrorClickThrough .mirror0 0 1
+MirrorClickThrough .mirror2 1
+Check "activating style" [ExStyleBits .mirror0] {0 0}
+Check "click through style" [ExStyleBits .mirror2] {1 1}
+MirrorClickThrough .mirror0 1
+Check "back to not activating" [ExStyleBits .mirror0] {1 1}
+proc twapi::get_mouse_location {} {global mouseXY; return $mouseXY}
+proc FocusN {n fg {update 1}} {global focused; lappend focused $n}
+proc CheckWindow {cmd n} {uplevel #0 $cmd}
+array set slot2position {1 1 2 2 3 3}
+set settings(mirrorsShown) 1
+set focused {}
+foreach {xy i} {{310 310} 0 {310 310} 1 {510 310} 1 {710 310} 2} {
+    set mouseXY $xy
+    MirrorActivated $i
+}
+Check "activated with the mouse in it" $focused {3 2}
+set mirrorEdit 1
+set mouseXY {310 310}
+MirrorActivated 0
+Check "not in edit mode" $focused {3 2}
+set mirrorEdit 0
+foreach i {0 1 2} {
+    destroy .mirror$i
+}
+set settings(mirrors) {}
+
 # mirrors shown in the Window Layout window
 set settings(mirrors) [list [dict create source 1 area {0 0 1 1} geom {0 0 10 10} top 1] \
     [dict create source main area {0 0 1 1} geom {0 0 10 10} top 1]]
