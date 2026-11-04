@@ -538,6 +538,44 @@ proc StoreDataDir {exeDir} {
     return [file join [file normalize $docs] OpenMultiBoxing]
 }
 
+# Store install: copies the package's Files\ (launchwow .bat files, LaunchWoW.txt) to the settings dir, as the
+# install folder is hidden. The .bat files only when missing (keeps the user's edits), the .txt ones when changed.
+# A refused copy (Controlled folder access) is reported, and retried at the next start.
+proc StoreCopyFiles {exeDir storeDir} {
+    set failed ""
+    foreach f [glob -nocomplain -directory [file join $exeDir Files] *] {
+        set dest [file join $storeDir [file tail $f]]
+        if {[file exists $dest] && ([string match -nocase *.bat $f] || [StoreSameFile $f $dest])} {
+            continue
+        }
+        if {[catch {file copy -force $f $dest} err]} {
+            Debug "Store: can't copy $f to $dest: $err"
+            if {$failed eq ""} {
+                set failed [list $storeDir $err]
+            }
+        } else {
+            Debug "Store: copied $f to $dest"
+        }
+    }
+    if {$failed ne ""} {
+        ProtectedFolderError "Error copying files" "Unable to copy the launchwow .bat files and LaunchWoW.txt to" \
+            {*}$failed "Until then they're not in that folder (they're copied there when OpenMultiBoxing starts)"
+    }
+}
+
+proc StoreSameFile {a b} {
+    if {[file size $a] != [file size $b]} {
+        return 0
+    }
+    set content {}
+    foreach f [list $a $b] {
+        set fd [open $f rb]
+        lappend content [read $fd]
+        close $fd
+    }
+    expr {[lindex $content 0] eq [lindex $content 1]}
+}
+
 if {![info exists wobInitDone]} {
     set wobInitDone 1
     set forceDebug 0
@@ -570,7 +608,11 @@ if {![info exists wobInitDone]} {
     if {$inExe} {
         set storeDir [StoreDataDir $app_dir]
         if {$storeDir ne ""} {
-            file mkdir $storeDir
+            # refused by Controlled folder access: reported when saving
+            if {[catch {file mkdir $storeDir} err]} {
+                Debug "Store: can't create $storeDir: $err"
+            }
+            set storeExeDir $app_dir
             set app_dir $storeDir
             set inStore 1
             Debug "Microsoft Store install, settings in $app_dir"
@@ -1159,17 +1201,25 @@ proc WriteSettingsFile {path content} {
         catch {file delete $tmp}
     }
     Debug "Saving settings to $path failed: $err"
+    ProtectedFolderError "Error saving settings" "Unable to save the settings to" $path $err \
+        "Until then your changes aren't saved"
+    return 0
+}
+
+# A write refused in the settings folder, most likely by Controlled folder access: reported once per session (the
+# settings are saved often, and the cause is the same for all the files).
+proc ProtectedFolderError {title what path err consequence} {
+    global settingsSaveErrorShown inStore
     if {[info exists settingsSaveErrorShown]} {
-        return 0
+        return
     }
     set settingsSaveErrorShown 1
     set where "Please do not put OpenMultiBoxing*.exe in a system/special/protected folder, put it on your Desktop instead for instance.\n\n"
     if {[info exists inStore] && $inStore} {
         set where ""
     }
-    OmbError "Error saving settings" \
-        "Unable to save the settings to\n[file nativename $path]\n($err)\n\n${where}Most likely Windows Security's \"Controlled folder access\" blocked it: it stops apps it doesn't know from changing files in Documents, Desktop... (Windows shows \"Unauthorized changes blocked\"). To allow OpenMultiBoxing: Windows Security > Virus & threat protection > Protection history, open the \"Protected folder access blocked\" entry, Actions > Allow on device.\n\nUntil then your changes aren't saved (this message is shown once)."
-    return 0
+    OmbError $title \
+        "$what\n[file nativename $path]\n($err)\n\n${where}Most likely Windows Security's \"Controlled folder access\" blocked it: it stops apps it doesn't know from changing files in Documents, Desktop... (Windows shows \"Unauthorized changes blocked\"). To allow OpenMultiBoxing: Windows Security > Virus & threat protection > Protection history, open the \"Protected folder access blocked\" entry, Actions > Allow on device.\n\n$consequence (this message is shown once)."
 }
 
 proc LoadProfile {} {
@@ -7098,6 +7148,11 @@ if {[info exists initProfile]} {
 }
 ApplyAppearance
 AppearanceBindings
+# after the appearance, for its possible error message
+if {$inStore && ![info exists storeFilesCopied]} {
+    set storeFilesCopied 1
+    StoreCopyFiles $storeExeDir $app_dir
+}
 
 
 # -- get/save sequence

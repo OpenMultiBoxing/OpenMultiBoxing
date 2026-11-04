@@ -1,0 +1,64 @@
+Launching several WoW windows with launchwow.bat / launchwowf.bat
+==================================================================
+
+The recommended way is to launch each WoW window from the Battle.net launcher
+(no password typing). These .bat files are an alternative: they start the
+game exe directly, several times, without Battle.net (you log in each window).
+
+  launchwow.bat   _retail_ (Wow.exe)
+  launchwowc.bat  _classic_ (WowClassic.exe)
+  launchwowf.bat  _forever_ (Wow.exe)
+
+What it does
+------------
+For each window number 1 to HOWMANY it:
+1. creates, if it doesn't exist yet, WTF\Config-<TEAM><number>.wtf (for
+   instance WTF\Config-WOB1.wtf) in the game folder, as a COPY of the current
+   WTF\Config.wtf (the config WoW normally uses)
+2. starts the game with that config (-config Config-WOB1.wtf)
+
+So each window has its own config, which WoW keeps updating: its account name,
+window mode and size, graphics, sound... Window 1 always remembers account 1,
+window 2 account 2, etc.
+
+Set up your basic settings FIRST
+--------------------------------
+The copies are only made the first time (when Config-<TEAM><number>.wtf
+doesn't exist), from whatever is in Config.wtf at that point. So before using
+the .bat the first time:
+1. launch WoW normally (Battle.net) and set what you want in every window:
+   windowed mode, graphics (lower for many windows), sound, etc.
+2. exit WoW (that's when Config.wtf gets saved)
+3. then run the .bat
+
+Changing Config.wtf later doesn't change the existing copies: change the
+setting in each window, or delete the WTF\Config-<TEAM>*.wtf files to have them
+made again from Config.wtf next time.
+
+Setting it up
+-------------
+Right click the .bat, Edit (Notepad), and change:
+  HOWMANY  how many windows
+  WOWDIR   the game folder (_retail_, _classic_, _forever_...) where you
+           installed WoW
+  BIN      the exe name: Wow.exe or WowClassic.exe
+  TEAM     the config name: for several teams, make a copy of the .bat per
+           team with a different TEAM each (e.g. TEAM=Alliance and TEAM=Horde),
+           so each team has its own set of configs and remembered accounts.
+
+Window order
+------------
+With auto capture, OpenMultiBoxing takes the window of the oldest (first
+started) WoW it finds for the next slot: 1, then 2, etc. But a WoW started
+later can show its window before an earlier one does (caching, slow first
+start), and then gets the lower number. So launchwowf.bat waits 1 second
+between windows (the "timeout /t 1" line). If yours always come up in order without it, you
+can comment that line out (add REM in front) to launch faster. In
+launchwow.bat / launchwowc.bat it's commented out: remove the REM if your
+windows come up out of order.
+
+Microsoft Store version
+-----------------------
+The Store version copies the 3 launchwow .bat files above and this one in
+Documents\OpenMultiBoxing (where its settings are) when it starts. Your edits
+to the .bat files are kept: they're only copied there when missing.

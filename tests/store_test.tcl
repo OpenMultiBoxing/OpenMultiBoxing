@@ -13,6 +13,37 @@ Check "store settings dir in Documents" [file isdirectory [file dirname $dir]] 1
 Check "store settings dir is the shell's Documents" [file dirname $dir] \
     [file normalize [twapi::get_shell_folder csidl_personal]]
 
+# the package's Files\ copied to the settings dir: .bat only when missing, .txt when changed
+proc WriteTestFile {path content} {set fd [open $path w]; puts -nonewline $fd $content; close $fd}
+proc ReadTestFile {path} {set fd [open $path]; set c [read $fd]; close $fd; return $c}
+set storeDir [file join $exeDir docs]
+file mkdir [file join $exeDir Files] $storeDir
+WriteTestFile [file join $exeDir Files launchwow.bat] "bat v1"
+WriteTestFile [file join $exeDir Files LaunchWoW.txt] "txt v1"
+StoreCopyFiles $exeDir $storeDir
+Check "store bat copied" [ReadTestFile [file join $storeDir launchwow.bat]] "bat v1"
+Check "store txt copied" [ReadTestFile [file join $storeDir LaunchWoW.txt]] "txt v1"
+WriteTestFile [file join $storeDir launchwow.bat] "user edit"
+WriteTestFile [file join $exeDir Files launchwow.bat] "bat v2"
+WriteTestFile [file join $exeDir Files LaunchWoW.txt] "txt v2"
+StoreCopyFiles $exeDir $storeDir
+Check "store bat edit kept" [ReadTestFile [file join $storeDir launchwow.bat]] "user edit"
+Check "store txt updated" [ReadTestFile [file join $storeDir LaunchWoW.txt]] "txt v2"
+WriteTestFile [file join $exeDir Files LaunchWoW.txt] "txt v3"
+StoreCopyFiles $exeDir $storeDir
+Check "store txt same size updated" [ReadTestFile [file join $storeDir LaunchWoW.txt]] "txt v3"
+StoreCopyFiles [file join $exeDir nofiles] $storeDir
+Check "store no Files dir" [lsort [glob -tails -directory $storeDir *]] {LaunchWoW.txt launchwow.bat}
+# a refused copy (Controlled folder access) is reported, once per session like the settings save errors
+proc OmbMessage {args} {global copyErrors; lappend copyErrors $args}
+set blocked [file join $exeDir Files launchwow.bat notadir]
+StoreCopyFiles $exeDir $blocked
+Check "store copy error reported" [llength $copyErrors] 1
+Check "store copy error message" [string match "*Controlled folder access*" [lindex $copyErrors 0]] 1
+StoreCopyFiles $exeDir $blocked
+Check "store copy error shown once" [llength $copyErrors] 1
+unset settingsSaveErrorShown
+
 # no update check (nor network access) from the Store build
 package require http
 set inStore 1

@@ -14,10 +14,13 @@ Extract all the files into any same normal folder (not Program Files or system f
 You can launch your game windows normally and OMB will place them where you've setup
 in the Windows Layout Wizard, or for games like wow, you can also:
 
-Right click edit and configure launchwow.bat to match your desires, if you prefer
-that to using Battle.net launcher (see links above for tradeoffs). Make multiple copies
+Right click edit and configure launchwow.bat (launchwowc.bat for classic,
+launchwowf.bat for _forever_) to match your desires, if you prefer that to using
+Battle.net launcher (see links above for tradeoffs). Make multiple copies
 for different sets of teams and change the TEAM variable value to make it unique.
-(see the other .bat files for classic and legacy launcher examples)
+Read LaunchWoW.txt first: what they do and why to set up your basic WoW settings
+before the first use.
+(see the other .bat files for legacy launcher examples)
 
 Watch setup video on youtube:
 
