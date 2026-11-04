@@ -1197,21 +1197,25 @@ proc SharedSettings {} {
     return {profile profiles games lastUpdateChecked profilesNotRotated}
 }
 
-# The Default profile's settings (the base settings file, an "array set settings {...}"), "" if not readable
+# The Default profile's settings: the base settings file ("array set settings {...}", maybe edited by the user) run
+# in a safe interpreter, as LoadSettings sources it. "" if not readable.
 proc DefaultProfileSettings {} {
     global SETTINGS_FILE
+    set i [interp create -safe]
     if {[catch {
         set f [open $SETTINGS_FILE]
         fconfigure $f -encoding utf-8
         set content [read $f]
         close $f
-        set s [lindex $content 3]
-        dict size $s
+        $i eval $content
+        set s [$i eval {array get settings}]
     } err]} {
         catch {close $f}
+        interp delete $i
         Debug "Default profile settings not readable from $SETTINGS_FILE: $err"
         return ""
     }
+    interp delete $i
     return $s
 }
 
