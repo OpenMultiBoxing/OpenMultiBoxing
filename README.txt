@@ -18,8 +18,8 @@ Right click edit and configure launchwow.bat (launchwowc.bat for classic,
 launchwowf.bat for _forever_) to match your desires, if you prefer that to using
 Battle.net launcher (see links above for tradeoffs). Make multiple copies
 for different sets of teams and change the TEAM variable value to make it unique.
-Read LaunchWoW.txt first: what they do and why to set up your basic WoW settings
-before the first use.
+Read LaunchWoW.txt first: what they do, and why to set up WoW (Windowed mode,
+graphics...) before the first use.
 (see the other .bat files for legacy launcher examples)
 
 Watch setup video on youtube:
