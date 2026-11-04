@@ -21,6 +21,15 @@ So each window has its own config, which WoW keeps updating: its account name,
 window mode and size, graphics, sound... Window 1 always remembers account 1,
 window 2 account 2, etc.
 
+Logging in each window
+----------------------
+Without Battle.net you log in each window (the account name is remembered
+per window). For the password, use File > "Clipboard copy/paster..." (Secure
+Copy Paste): type it there (only *s show), then click Broadcast (or press
+Enter) to type it in all the game windows at once. Or click Copy and Ctrl-V
+it in each window. Close it or click Clear to erase it (from the clipboard
+too). Options > "Auto open clipboard at startup" opens it every time.
+
 Set up your basic settings FIRST
 --------------------------------
 The copies are only made the first time (when Config-<TEAM><number>.wtf
