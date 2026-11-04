@@ -79,6 +79,6 @@ next time.
 Microsoft Store version
 -----------------------
 The Store version puts the 3 .bat files above and this file in your Documents
-folder, in Documents\OpenMultiBoxing (with its settings), when it starts. Open
-them from there (File Explorer, Documents). Your changes to the .bat files are
+folder, in Documents\OpenMultiBoxing (with its settings), when it starts.
+File > "Open settings folder" opens that folder. Your changes to the .bat files are
 kept: they're only put there when missing.
