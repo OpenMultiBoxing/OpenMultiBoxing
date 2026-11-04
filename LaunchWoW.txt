@@ -1,0 +1,84 @@
+Starting several WoW windows at once with the launchwow .bat files
+==================================================================
+
+The easiest is to start each WoW window from the Battle.net launcher (no
+password to type). These .bat files are another way: double click one and it
+starts WoW several times at once, without Battle.net. You then log in each
+window yourself (see "Logging in" below).
+
+  launchwow.bat   for Retail          (the _retail_ folder)
+  launchwowc.bat  for Classic         (the _classic_ folder)
+  launchwowf.bat  for WoW "_forever_" (the _forever_ folder)
+
+Before the first use: set up WoW
+--------------------------------
+Each window gets its own WoW settings file (window size, graphics, sound,
+remembered account name...), so each window can have different ones. The
+first time, these are all made as a copy of your current WoW settings. So
+before you run a .bat the first time:
+1. start WoW normally (from Battle.net) and set it up the way you want
+   every window to start: Windowed mode, graphics (lower them when you run
+   many windows), sound, etc.
+2. exit WoW (that's when WoW saves your settings)
+3. now run the .bat
+
+After that, changing the settings of your normal WoW doesn't change the
+windows' copies: change the setting in each window instead, or start over
+(see "Starting over" below).
+
+Setting it up
+-------------
+Right click the .bat and pick "Edit" (on Windows 11: "Show more options"
+first, or "Edit in Notepad"). Change the values after the = signs:
+  HOWMANY  how many WoW windows to start, e.g. set HOWMANY=3
+  WOWDIR   where WoW is installed. The default is the usual Battle.net
+           location; if you installed WoW somewhere else (e.g. on D:), put
+           that folder here, ending with \_retail_ (or \_classic_ or
+           \_forever_, the one you play)
+  BIN      the game program: Wow.exe (Retail, _forever_) or WowClassic.exe
+           (Classic)
+  TEAM     a name for this set of windows. To have several teams (different
+           accounts in each window), make a copy of the .bat for each team
+           and give each a different TEAM, e.g. TEAM=Alliance and TEAM=Horde.
+Save (Ctrl-S) and close Notepad, then double click the .bat to run it.
+
+Logging in
+----------
+Each window remembers its account name (check "Remember account name" on
+the login screen), so window 1 always comes up with account 1, window 2 with
+account 2, etc. To type the password without showing it, use OpenMultiBoxing's
+File > "Clipboard copy/paster..." window: type the password there (only *
+show), then click Broadcast (or press Enter) to type it in all the WoW windows
+at once. Or click Copy, then click in each WoW window's password box and press
+Ctrl-V. Close that window or click Clear when done: it erases the password
+(also from the clipboard). Options > "Auto open clipboard at startup" opens it
+every time.
+
+Window order
+------------
+OpenMultiBoxing gives the windows their number (WoW 1, WoW 2...) in the order
+WoW was started, as their windows appear. But sometimes a WoW started later
+shows its window first (e.g. the first start after a WoW update is slower),
+and then gets a lower number than it should. That's why launchwowf.bat waits
+1 second between windows, on the line:
+    timeout /t 1 >NUL
+If your windows always come up in the right order without that wait, you can
+turn it off to start faster: put REM and a space in front of that line (REM
+means "ignore this line"). In launchwow.bat and launchwowc.bat it's off (REM
+in front): if your windows come up in the wrong order, remove that REM. You
+can also use File > "Close all games..." and run the .bat again.
+
+Starting over
+-------------
+The windows' settings files are in the WTF folder inside the WOWDIR folder,
+named Config-<TEAM><number>.wtf, for instance Config-WOB1.wtf, Config-WOB2.wtf
+(WOB is the default TEAM). Delete them (NOT Config.wtf, which is your normal
+WoW's settings) and the .bat makes them again from your current settings the
+next time.
+
+Microsoft Store version
+-----------------------
+The Store version puts the 3 .bat files above and this file in your Documents
+folder, in Documents\OpenMultiBoxing (with its settings), when it starts. Open
+them from there (File Explorer, Documents). Your changes to the .bat files are
+kept: they're only put there when missing.

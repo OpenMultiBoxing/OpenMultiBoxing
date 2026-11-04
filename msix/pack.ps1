@@ -17,6 +17,11 @@ New-Item -ItemType Directory $Dir | Out-Null
 Copy-Item $Exe (Join-Path $Dir OpenMultiBoxing.exe)
 Set-Content (Join-Path $Dir OpenMultiBoxing.store) 'Microsoft Store install: settings in Documents\OpenMultiBoxing'
 Copy-Item -Recurse (Join-Path $PSScriptRoot Assets) (Join-Path $Dir Assets)
+# copied to Documents\OpenMultiBoxing by the app (StoreCopyFiles)
+New-Item -ItemType Directory (Join-Path $Dir Files) | Out-Null
+foreach ($f in 'launchwow.bat', 'launchwowc.bat', 'launchwowf.bat', 'LaunchWoW.txt') {
+    Copy-Item (Join-Path $PSScriptRoot "..\$f") (Join-Path $Dir Files)
+}
 $manifest = (Get-Content (Join-Path $PSScriptRoot AppxManifest.xml) -Raw).Replace('Version="0.0.0.0"', "Version=""$pkgVersion""")
 Set-Content (Join-Path $Dir AppxManifest.xml) $manifest -NoNewline
 $makeappx = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe' | Sort-Object FullName |
