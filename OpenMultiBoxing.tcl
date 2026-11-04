@@ -1539,9 +1539,19 @@ proc FocusFollowMouseToggle {} {
 }
 
 proc updateIndex {args} {
-    global nextWindow maxNumW pos windowSize stayOnTop settings slot2handle
+    global nextWindow maxNumW pos windowSize stayOnTop settings slot2handle sot
     Debug "nextWindow is $nextWindow - args $args"
-    if {[info exists settings($nextWindow,size)]} {
+    # Window Layout open: its draft (not saved yet) for that window, see LayoutToMain/MainToLayout
+    if {[winfo exists .layout.c] && [string is integer -strict $nextWindow] \
+            && [set draft [SizeOfWindow wow$nextWindow]] ne ""} {
+        lassign $draft x y w h
+        set windowSize "$w $h"
+        set pos "$x $y"
+        if {[info exists sot($nextWindow)]} {
+            set stayOnTop $sot($nextWindow)
+        }
+        UpdateLayoutInfo wow$nextWindow
+    } elseif {[info exists settings($nextWindow,size)]} {
         set windowSize $settings($nextWindow,size)
         set pos $settings($nextWindow,posXY)
         if {[info exists settings($nextWindow,stayOnTop)]} {
@@ -1613,7 +1623,12 @@ proc UISetup {} {
     bind .e1 <FocusIn> [list focusIn %W]
     grid [ttk::label .l3 -text "Resize to" -anchor e] [entry .e2 -textvariable windowSize -width $width] -padx 4 -sticky ew
     grid [ttk::label .l4 -text "Move to" -anchor e] [entry .e3 -textvariable pos -width $width] -padx 4 -sticky ew
-    grid [ttk::checkbutton .csop -text "Wow window always on top" -variable stayOnTop] -columnspan 2
+    # previewed in the Window Layout when it's open
+    foreach e {.e2 .e3} {
+        bind $e <Return> MainToLayout
+        bind $e <FocusOut> MainToLayout
+    }
+    grid [ttk::checkbutton .csop -text "Wow window always on top" -variable stayOnTop -command MainStayOnTopToLayout] -columnspan 2
     grid [ttk::button .b2 -text " Capture " -command CaptureOrUpdate] -pady 5 -columnspan 2
     grid [listbox .lbw -height 6] -columnspan 2 -sticky ns
     bind .lbw <<ListboxSelect>> [list selectChanged %W]
@@ -3843,6 +3858,7 @@ proc WindowLayout {} {
     toplevel $tw
     wm title $tw "OpenMultiBoxing Window Layout"
     RememberGeometry $tw layoutGeometry
+    LayoutBindClose $tw
     ttk::checkbutton $tw.cbA -variable settings(layoutAuto) -text "Auto" -command ChangeLayout
     tooltip $tw.cbA "Automatically regenerate the layout on any change\nwhen checked. Uncheck for manual layout"
     ttk::checkbutton $tw.cbT -variable settings(layoutTop) -text "Main at bottom" -command ChangeLayout
@@ -4315,6 +4331,7 @@ proc LoadLayout {} {
     SetupMove
     # after the stay on top windows get raised
     after idle LayoutShowMirrors
+    updateIndex
 }
 
 proc SizeOfWindow {tag} {
@@ -5434,6 +5451,7 @@ proc ChangeLayout {args} {
     $c scale wowAll 0 0 $scale $scale
     SetupMove
     after idle LayoutShowMirrors
+    updateIndex
 }
 
 proc AutoLayout {n layoutOneSize} {
@@ -5732,6 +5750,75 @@ proc UpdateLayoutInfo {tag} {
     set layoutinfo "OMB $id: Top Left ($x1 , $y1) Size $w x $h$x"
 }
 
+# Window Layout -> main window: the window clicked, moved or resized in the layout becomes the main window's
+# selected one, with its draft size, position and stay on top (updateIndex reads them from the layout)
+proc LayoutToMain {tag} {
+    global nextWindow
+    if {![regexp {^wow(\d+)$} $tag -> id]} {
+        return
+    }
+    # also when it's already the selected one: the trace refreshes the fields
+    set nextWindow $id
+}
+
+# Main window -> Window Layout: the size/position typed in the main window (Enter or leaving the field) moves
+# that window in the layout (a preview: Save and Apply in the layout applies it)
+proc MainToLayout {} {
+    global nextWindow scale settings
+    set c .layout.c
+    if {![winfo exists $c] || ![string is integer -strict $nextWindow] || [SizeOfWindow wow$nextWindow] eq ""} {
+        return
+    }
+    set x [GetX]
+    set y [GetY]
+    set w [GetWidth]
+    set h [GetHeight]
+    foreach v [list $x $y $w $h] {
+        if {![string is integer -strict $v]} {
+            Debug "MainToLayout: not a number in $x $y $w $h"
+            return
+        }
+    }
+    if {$w <= 0 || $h <= 0} {
+        return
+    }
+    set tag wow$nextWindow
+    lassign [SizeOfWindow $tag] ox oy ow oh
+    if {$ox == $x && $oy == $y && $ow == $w && $oh == $h} {
+        return
+    }
+    Debug "MainToLayout $tag $x $y $w $h"
+    # the resize corner is redrawn when the mouse is over the window again
+    global lastResize
+    $c delete wowResize
+    set lastResize ""
+    set x1 [expr {$x*$scale}]
+    set y1 [expr {$y*$scale}]
+    $c coords "$tag&&wowWindow" $x1 $y1 [expr {($x+$w)*$scale}] [expr {($y+$h)*$scale}]
+    $c coords "$tag&&wowText" $x1 $y1
+    set settings(layoutAuto) 0
+    UpdateWindowText $tag $w $h
+    UpdateLayoutInfo $tag
+}
+
+# Window Layout closed without Save and Apply: the main window shows the saved values again, not the draft
+proc LayoutBindClose {tw} {
+    # (also called for the widgets inside)
+    bind $tw <Destroy> "if {{%W} eq {$tw}} {after idle updateIndex}"
+}
+
+# Main window's stay on top checkbox -> that window's pin in the Window Layout
+proc MainStayOnTopToLayout {} {
+    global nextWindow stayOnTop sot
+    if {![winfo exists .layout.c] || ![string is integer -strict $nextWindow] \
+            || [set draft [SizeOfWindow wow$nextWindow]] eq ""} {
+        return
+    }
+    set sot($nextWindow) $stayOnTop
+    lassign $draft x y w h
+    UpdateWindowText wow$nextWindow $w $h
+}
+
 # -- move/resize windows in layout
 proc SetupMove {} {
     set c .layout.c
@@ -5744,6 +5831,7 @@ proc SetupMove {} {
         set sot($id) [expr {1-$sot($id)}]
         lassign [SizeOfWindow $selectedTag] x1 y1 w h
         UpdateWindowText $selectedTag $w $h
+        LayoutToMain $selectedTag
     }
     $c bind wowWindow||wowText||wowResize <ButtonPress-1> {
         set selectedWindow [%W find withtag current]
@@ -5751,6 +5839,7 @@ proc SetupMove {} {
         set selectedTag [lindex $allTags 0]
         lassign [SizeOfWindow $selectedTag] x1 y1 w h
         UpdateLayoutInfo $selectedTag
+        LayoutToMain $selectedTag
         set dragMode move
         if {[lsearch -exact $allTags wowResize]!=-1} {
             set dragMode resize
@@ -5770,6 +5859,7 @@ proc SetupMove {} {
             %W move $selectedTag [expr {$nx1-$x1}] [expr {$ny1-$y1}]
             UpdateLayoutInfo $selectedTag
         }
+        LayoutToMain $selectedTag
     }
     $c bind wowWindow <B1-Motion> {
         set changed_x [expr %x - $atx]
@@ -5780,6 +5870,7 @@ proc SetupMove {} {
         set aty %y
         set settings(layoutAuto) 0
         UpdateLayoutInfo $selectedTag
+        LayoutToMain $selectedTag
     }
     $c bind wowResize <B1-Motion> {
         global layoutinfo
@@ -5812,6 +5903,7 @@ proc SetupMove {} {
         set settings(layoutAuto) 0
         UpdateWindowText $selectedTag $w $h
         UpdateLayoutInfo $selectedTag
+        LayoutToMain $selectedTag
     }
     global lastResize
     set lastResize ""
@@ -5857,6 +5949,7 @@ proc SetupMove {} {
         if {$selectedTag != ""} {
             %W move $selectedTag -$scale 0
             UpdateLayoutInfo $selectedTag
+            LayoutToMain $selectedTag
         }
     }
     bind $c <Right> {
@@ -5864,6 +5957,7 @@ proc SetupMove {} {
         if {$selectedTag != ""} {
             %W move $selectedTag $scale 0
             UpdateLayoutInfo $selectedTag
+            LayoutToMain $selectedTag
         }
     }
     bind $c <Up> {
@@ -5871,6 +5965,7 @@ proc SetupMove {} {
         if {$selectedTag != ""} {
             %W move $selectedTag 0 -$scale
             UpdateLayoutInfo $selectedTag
+            LayoutToMain $selectedTag
         }
     }
     bind $c <Down> {
@@ -5878,6 +5973,7 @@ proc SetupMove {} {
         if {$selectedTag != ""} {
             %W move $selectedTag 0 $scale
             UpdateLayoutInfo $selectedTag
+            LayoutToMain $selectedTag
         }
     }
     UpdateHandles
