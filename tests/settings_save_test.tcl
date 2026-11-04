@@ -43,3 +43,17 @@ Check "folder path in the clipboard" [clipboard get] [file nativename $app_dir]
 clipboard clear
 rename twapi::shell_execute {}
 rename shell_execute_orig twapi::shell_execute
+
+# Edit raw settings: a window shows which file is edited, its button reloads the settings and closes it
+proc UpdateHandles {} {}
+proc LoadSettings {} {global reloaded; incr reloaded}
+set reloaded 0
+set pf [file join $app_dir test.tcl]
+ReloadReminder $pf
+Check "reminder shown" [winfo exists .reloadReminder] 1
+Check "reminder names the file" [expr {[string first [file nativename $pf] [.reloadReminder.l cget -text]] >= 0}] 1
+ReloadReminder $pf
+Check "reminder reused" [llength [winfo children .reloadReminder]] 3
+.reloadReminder.reload invoke
+Check "reloaded" $reloaded 1
+Check "reminder closed" [winfo exists .reloadReminder] 0

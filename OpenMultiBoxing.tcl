@@ -1372,9 +1372,6 @@ proc ProfileRotationDialog {} {
 
 proc LoadSettings {} {
     global SETTINGS_FILE settings app_dir
-    if {[winfo exists .b1]} {
-        .b1 configure -text "Edit Settings" -command EditSettings
-    }
     if {[file exists $SETTINGS_FILE]} {
         if {[catch {source -encoding utf-8 $SETTINGS_FILE} err]} {
             puts stderr "Could not source $SETTINGS_FILE\n$err"
@@ -1607,8 +1604,8 @@ proc UISetup {} {
     tooltip .bH "Opens online help page"
     grid [ttk::button .bwl -text "Window Layout" -width $labelW -command WindowLayout] -row 2 -column 1
     tooltip .bwl "View or change the Window Layout"
-    grid [ttk::button .b1  -text "Edit Settings" -width $labelW -command EditSettings] -row 3 -column 1
-    tooltip .b1 "Opens the editor to edit raw settings\nand reload them after save.\nHotkeys are changed with File > Hotkeys..."
+    grid [ttk::button .b1  -text "Mirrors" -width $labelW -command MirrorsDialog] -row 3 -column 1
+    tooltip .b1 "Live copies of an area of a game window\n(minimap, target frame...) anywhere on screen"
     # label width - enough to fit "-9999 -9999"
     set width 10
     grid [frame .sep1 -relief groove -borderwidth 2 -width 2 -height 2] -sticky ew -padx 4 -pady 4 -columnspan 2
@@ -2732,10 +2729,28 @@ proc EditSettings {} {
             clipboard clear
             clipboard append $pf
             OmbError "OpenMultiBoxing editor error" \
-                "Unable to open an editor ($err) for\n\n$pf\n\nThat path is now in the clipboard: open it with your\ntext editor and then click Reload Settings."
+                "Unable to open an editor ($err) for\n\n$pf\n\nThat path is now in the clipboard: open it with your\ntext editor and then click Reload settings."
         }
     }
-    .b1 configure -text "Reload Settings" -command LoadSettings
+    ReloadReminder $pf
+}
+
+# While the raw settings are edited: the file and a button to reload it once saved in the editor
+proc ReloadReminder {pf} {
+    set tw .reloadReminder
+    if {![winfo exists $tw]} {
+        toplevel $tw
+        wm title $tw "OMB Edit raw settings"
+        wm resizable $tw 0 0
+        RememberGeometry $tw reloadReminderGeometry
+        grid [ttk::label $tw.l -justify left] -columnspan 2 -padx 8 -pady 6 -sticky w
+        grid [ttk::button $tw.reload -text "Reload settings" -command "LoadSettings; destroy $tw"] \
+            [ttk::button $tw.close -text "Close" -command [list destroy $tw]] -padx 8 -pady 6
+        UpdateHandles
+    }
+    $tw.l configure -text "Editing\n[file nativename $pf]\n\nOnce you saved your changes in the editor,\nclick Reload settings to use them."
+    wm state $tw normal
+    raise $tw
 }
 
 # The folder with the settings files (Documents\OpenMultiBoxing for the Store version, with the launch .bat files)
