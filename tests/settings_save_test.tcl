@@ -24,3 +24,22 @@ Check "reported" [llength $errors] 1
 Check "reported once" [WriteSettingsFile $path "x"] 0
 Check "still one message" [llength $errors] 1
 file delete -force $dir
+
+# File > Open settings folder: the settings dir in File Explorer, else its path in the clipboard and a message
+set app_dir [file join $env(TEMP) settings_folder_test]
+# Tk 9.1 crashes on clipboard clear before the main window really exists (in the app it's shown by then)
+update
+rename twapi::shell_execute shell_execute_orig
+proc twapi::shell_execute {args} {global opened; lappend opened $args}
+set opened {}
+set errors {}
+OpenSettingsFolder
+Check "folder opened" $opened [list [list -path [file nativename $app_dir]]]
+Check "no folder error" [llength $errors] 0
+proc twapi::shell_execute {args} {error "no such folder"}
+OpenSettingsFolder
+Check "folder error reported" [llength $errors] 1
+Check "folder path in the clipboard" [clipboard get] [file nativename $app_dir]
+clipboard clear
+rename twapi::shell_execute {}
+rename shell_execute_orig twapi::shell_execute
