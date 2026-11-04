@@ -1163,7 +1163,7 @@ proc SaveSettings {args} {
         set pf [ProfileFileName $p]
         set content "array set settings \{\n"
         foreach i [lsort [array names settings]] {
-            if {$i=="profile" || $i=="profiles" || $i=="games" || $i=="lastUpdateChecked" || $i=="profilesNotRotated"} {
+            if {$i in [SharedSettings]} {
                 continue
             }
             append content "\t$i\t[list $settings($i)]\n"
@@ -1174,12 +1174,45 @@ proc SaveSettings {args} {
         }
     }
     Debug "SaveSettings base $SETTINGS_FILE (from cb $args)"
+    # the base file is also the Default profile: from another profile, only its shared settings change
+    array set base [array get settings]
+    if {$p!="Default"} {
+        array set base [DefaultProfileSettings]
+        foreach i [SharedSettings] {
+            if {[info exists settings($i)]} {
+                set base($i) $settings($i)
+            }
+        }
+    }
     set content "array set settings \{\n"
-    foreach i [lsort [array names settings]] {
-        append content "\t$i\t[list $settings($i)]\n"
+    foreach i [lsort [array names base]] {
+        append content "\t$i\t[list $base($i)]\n"
     }
     append content "\}\n"
     WriteSettingsFile $SETTINGS_FILE $content
+}
+
+# Settings for all the profiles, only in the base settings file (not in the profile files)
+proc SharedSettings {} {
+    return {profile profiles games lastUpdateChecked profilesNotRotated}
+}
+
+# The Default profile's settings (the base settings file, an "array set settings {...}"), "" if not readable
+proc DefaultProfileSettings {} {
+    global SETTINGS_FILE
+    if {[catch {
+        set f [open $SETTINGS_FILE]
+        fconfigure $f -encoding utf-8
+        set content [read $f]
+        close $f
+        set s [lindex $content 3]
+        dict size $s
+    } err]} {
+        catch {close $f}
+        Debug "Default profile settings not readable from $SETTINGS_FILE: $err"
+        return ""
+    }
+    return $s
 }
 
 # Writes a settings file: in a temporary file renamed over it, so a refused write doesn't leave it empty.
