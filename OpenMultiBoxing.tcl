@@ -5132,6 +5132,8 @@ proc OverlayConfig {} {
 
     grid [ttk::checkbutton $tw.clickable -text "Clickable overlay" -variable settings(overlayClickable) -command "Overlay; SaveSettings"] -padx 8 -pady 2 -columnspan 3
     grid [ttk::checkbutton $tw.bigAll -text "Click to swap all area on windows 2+" -variable settings(overlayAllClickable) -command "Overlay; SaveSettings"] -padx 8 -pady 2 -columnspan 3
+    tooltip $tw.clickable "Click a window's number to make it the main one\n(window 1's number swaps to the next window)"
+    tooltip $tw.bigAll "With Clickable overlay: a click anywhere in windows 2+ swaps\nit to main, but you can't click inside them anymore.\nThe Mirrored layout (Window Layout) does it better:\nclicking a mirror swaps without covering anything."
     if {$hasRR||$hasBR} {
         grid [ttk::label $tw.lr1 -text "$RRlabel indicator:" -font WOBBold -anchor w] -columnspan 3 -sticky ew -padx 6
         grid [ttk::label $tw.lr2 -text "Label:" -anchor e] [entry $tw.re1 -width 5 -textvariable settings(rrIndicator,label)] -sticky ew -padx 6
