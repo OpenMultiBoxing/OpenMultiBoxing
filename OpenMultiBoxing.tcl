@@ -4364,7 +4364,14 @@ proc BroadcastKeys {keySequence} {
 proc BroadcastText {text {addEnterKey 0}} {
     global settings slot2handle
     set first 1
-    foreach {n w} [array get slot2handle] {
+    # the window in the main spot last, so it ends up on top again (not the last one typed in)
+    set slots [lsort -integer [array names slot2handle]]
+    set main [SlotAtPosition 1]
+    if {[set i [lsearch -exact $slots $main]] >= 0} {
+        set slots [linsert [lreplace $slots $i $i] end $main]
+    }
+    foreach n $slots {
+        set w $slot2handle($n)
         Debug "Sending text to $n ($w)"
         if {![twapi::set_foreground_window $w]} {
             Debug "Failed to set fg for $n ($w)"
@@ -4380,6 +4387,12 @@ proc BroadcastText {text {addEnterKey 0}} {
         twapi::send_input_text $text
         if {$addEnterKey} {
             twapi::send_input {{key 13 0}}
+        }
+    }
+    if {[LayoutMirrored]} {
+        # also later: a game busy with what it got (e.g. Enter world) can come back on top
+        foreach ms {0 500 1500 3000} {
+            after $ms {catch StackUnderMain}
         }
     }
 }
