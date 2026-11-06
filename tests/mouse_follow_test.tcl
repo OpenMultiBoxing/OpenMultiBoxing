@@ -84,3 +84,28 @@ set ffm {}
 set mouseFollow 0
 RevertMouseFollow
 Check "off: nothing at exit" $ffm {}
+
+# exit while broadcasting (which turned it off for now): on again
+set pauseNow 0
+PeriodicChecks
+set hasRR 1
+set rrOn 1
+set rrMouse 1
+set mouseFollow 0
+set ffm {}
+RevertMouseFollow
+Check "broadcasting: on at exit" $ffm 1
+# turned off by the user after broadcasting was turned off
+set rrOn 0
+set ffm {}
+RevertMouseFollow
+Check "not broadcasting: nothing at exit" $ffm {}
+# exit while paused, broadcasting paused too (RRToggle turns rrOn off)
+set rrOn 1
+set pauseNow 1
+PeriodicChecks
+set rrOn 0
+Check "paused broadcasting: rrMouse saved" [list $rrMouse $prevRRMouse $prevRR] {0 1 1}
+set ffm {}
+RevertMouseFollow
+Check "paused broadcasting: on at exit" $ffm 1

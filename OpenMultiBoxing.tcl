@@ -779,6 +779,7 @@ proc ConnectTo {destination} {
         Debug "Closing master socket $master"
         close $master
         unset master
+        ReleaseNetworkKeys
     }
     set masterHost $destination
     if {[catch {set master [socket $destination $settings(listenPort)]} err]} {
@@ -842,14 +843,29 @@ proc PrimaryMonitorExtent {} {
     return [dict get [lindex $monitors 0] -extent]
 }
 
+# netDown(keyCode): pressed for real (no captured window) by the main OMB, not released yet
+array set netDown {}
+
+# Releases the keys the main OMB pressed here, e.g. when its connection is lost
+proc ReleaseNetworkKeys {} {
+    global netDown
+    foreach code [array names netDown] {
+        Debug "Releasing network key $code"
+        catch {twapi::send_input [list [list "keyup" $code 0]]}
+    }
+    array unset netDown *
+    ReleaseBroadcastKeys
+}
+
 proc Master {s} {
-    global master slot2handle settings networkPause
+    global master slot2handle settings networkPause netDown
     set l [gets $s data]
     if {$l <= 0} {
         if {[eof $s]} {
             Debug "Master socket $s closed"
             close $s
             unset master
+            ReleaseNetworkKeys
             UpdateNetStatus
             OmbError "No connection" "Lost/Rejected connection to master OMB"
         }
@@ -857,10 +873,11 @@ proc Master {s} {
         return
     }
     Debug "Master socket $s pause $networkPause got data: $data"
-    if {$networkPause} {
+    lassign $data cmd code
+    # key ups still go through while paused, so keys pressed before don't stay down
+    if {$networkPause && $cmd ne "UP"} {
         return
     }
-    lassign $data cmd code
     # No captured window: full screen mode (global input), otherwise input goes to the windows
     set fullScreen [expr {[array size slot2handle]==0}]
     switch $cmd {
@@ -900,14 +917,16 @@ proc Master {s} {
             }
         }
         "UP" {
-            if {$fullScreen} {
+            if {[info exists netDown($code)]} {
+                unset netDown($code)
                 twapi::send_input [list [list "keyup" $code 0]]
-            } else {
-                BroadcastKeyToOther -1 $code 1
             }
+            # only to the windows that got the down
+            BroadcastKeyToOther -1 $code 1
         }
         "DOWN" {
             if {$fullScreen} {
+                set netDown($code) 1
                 twapi::send_input [list [list "keydown" $code 0]]
             } else {
                 BroadcastKeyToOther -1 $code 0
@@ -917,6 +936,7 @@ proc Master {s} {
             Debug "Master socket $s unknown command $cmd"
             close $master
             unset master
+            ReleaseNetworkKeys
             UpdateNetStatus
             OmbError "Unknown command" "Master socket $s unknown command $data"
         }
@@ -1501,10 +1521,18 @@ proc RegisterAllHotkeys {} {
     }
 }
 
+# The user's focus follows mouse choice, also when broadcasting turned it off for now
+proc MouseFollowChoice {} {
+    global mouseFollow rrOn rrMouse isPaused prevRR prevRRMouse
+    expr {$mouseFollow || ([info exists rrMouse] && $rrMouse && [info exists rrOn] && $rrOn)
+          || ([info exists isPaused] && $isPaused && [info exists prevRR] && $prevRR
+              && [info exists prevRRMouse] && $prevRRMouse)}
+}
+
 proc RevertMouseFollow {} {
-    global mouseDelay settings mouseFollow
+    global mouseDelay settings
     if {!$settings(mouseFocusOffAtExit)} {
-        if {$mouseFollow} {
+        if {[MouseFollowChoice]} {
             Debug "Keeping mouse focus mode on on exit"
             ApplyMouseFollow 1
         }
@@ -4878,19 +4906,19 @@ proc RRCheck {} {
             set rrSentDown($code) 1
         }
     }
-    foreach code $rrExcludes {
-        set state [twapi::GetAsyncKeyState $code]
-        if {$state != 0} {
-            # modifier held; return
-            set rrLastCode [GetKeyboardState]
-            return
-        }
-    }
     # current state
     set curState [GetKeyboardState]
     lassign [DeltaKeyboardState $rrLastCode $curState] newUp newDown
     #Debug "RRCheck: newUp $newUp newDown $newDown"
     set rrLastCode $curState
+    # Keys released while a pausing modifier is held still go up (they would stay down in the
+    # other windows otherwise), keys pressed then aren't broadcast
+    set paused 0
+    foreach code $rrExcludes {
+        if {[twapi::GetAsyncKeyState $code] != 0} {
+            set paused 1
+        }
+    }
     foreach code $newUp {
         unset -nocomplain rrPendingMods($code)
         if {![info exists rrSentDown($code)]} {
@@ -4900,6 +4928,9 @@ proc RRCheck {} {
         }
         Debug "Key $code now reset, sending up event to windows that got the down"
         BroadcastKeyEvent $n $code 1
+    }
+    if {$paused} {
+        return
     }
     # Process modifiers first so they are pending before a key pressed in the same check
     set mods {}
