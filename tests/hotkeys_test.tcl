@@ -37,9 +37,27 @@ foreach {hk expected} {
     Ctrl-Shift-0xC0 Ctrl-Shift-~
     Ctrl-0xBD Ctrl--
     Ctrl-F2 Ctrl-F2
+    Ctrl-F12 Ctrl-F12
+    192 ~
+    Alt-192 Alt-~
     "" ""
 } {
     Check "HotkeyDisplay $hk" [HotkeyDisplay $hk] $expected
+}
+
+foreach {hk expected} {
+    Ctrl-F2 ""
+    Shift modifierOnly
+    Ctrl-Shift modifierOnly
+    192 noModifier
+    0xC0 noModifier
+    A noModifier
+    F5 noModifier
+    F13 ""
+    PAUSE ""
+    Alt-192 ""
+} {
+    Check "HotkeyProblem $hk" [HotkeyProblem $hk] $expected
 }
 
 Check "HotkeyLabel hk3,swap" [HotkeyLabel hk3,swap] "Swap window 3"
@@ -136,6 +154,25 @@ Check "defaults hk13" [info exists settings(hk13,focus)] 0
 HotkeysUndo
 Check "undo defaults hk13" $settings(hk13,focus) Ctrl-Alt-1
 Check "undo defaults capture" $settings(hk,capture) ""
+
+set hotkeyNote {}
+set settings(hk,swapNextWindow) 192
+set settings(hk,capture) Shift
+HotkeysDialogRefresh
+update
+Check "no modifier warned" [string match "*orange*other programs*: Swap next window (~)." [.hotkeys.warn cget -text]] 1
+Check "no modifier warning shown" [winfo ismapped .hotkeys.warn] 1
+Check "warning above the buttons" [expr {[dict get [grid info .hotkeys.warn] -row] < [dict get [grid info .hotkeys.b] -row]}] 1
+Check "no modifier in orange" [$hotkeyButtons(hk,swapNextWindow) cget -style] OmbHotkeyWarn.TButton
+Check "modifier only error" [string match "*red*never work*: Capture (Shift)." [.hotkeys.status cget -text]] 1
+Check "modifier only in red" [$hotkeyButtons(hk,capture) cget -style] OmbHotkeyFailed.TButton
+set settings(hk,swapNextWindow) Ctrl-0xC0
+set settings(hk,capture) Ctrl-Shift-C
+HotkeysDialogRefresh
+update
+Check "no error" [.hotkeys.status cget -text] " "
+Check "no warning" [winfo ismapped .hotkeys.warn] 0
+Check "normal style" [$hotkeyButtons(hk,swapNextWindow) cget -style] TButton
 
 HotkeysDialogClose
 Check "closed" [winfo exists .hotkeys] 0
