@@ -2940,7 +2940,8 @@ proc HotkeyName {mods vk} {
 
 # Hotkey as shown to users: Ctrl-0xC0 is Ctrl-~ (twapi only takes the code for punctuation keys)
 proc HotkeyDisplay {hk} {
-    if {![regexp {^(.*?)(0[xX][0-9a-fA-F]+)$} $hk all mods vk]} {
+    # (192 too: multi digit numbers are key codes, as typed in the settings file)
+    if {![regexp {^((?:[^-]+-)*)(0[xX][0-9a-fA-F]+|[0-9]{2,})$} $hk all mods vk]} {
         return $hk
     }
     # character of that key in the current keyboard layout (MAPVK_VK_TO_CHAR), high bit is dead keys
@@ -2954,6 +2955,22 @@ proc HotkeyDisplay {hk} {
         set c "~"
     }
     return $mods$c
+}
+
+# Problem with a hotkey, if any: "modifierOnly" (Shift alone never triggers) or "noModifier" (~ alone
+# triggers from every program, and can't be typed in them while OMB runs; except keys nobody types)
+proc HotkeyProblem {hk} {
+    lassign [HotkeyToModsVk $hk] mods vk
+    if {$vk eq ""} {
+        return
+    }
+    if {$vk in {16 17 18 91 92 160 161 162 163 164 165}} {
+        return modifierOnly
+    }
+    # F13-F24, Pause, Scroll Lock, browser and media keys
+    if {$mods == 0 && !(($vk >= 0x7C && $vk <= 0x87) || $vk in {19 145} || ($vk >= 0xA6 && $vk <= 0xB7))} {
+        return noModifier
+    }
 }
 
 proc HotkeyLabel {var} {
@@ -3070,6 +3087,22 @@ proc HotkeysDialogRefresh {} {
     if {[llength $failed]} {
         lappend status "Hotkeys in red are already used by another application: [join $failed {, }]." \
             "Click them to pick different keys."
+    }
+    array set problems {modifierOnly {} noModifier {}}
+    foreach var [lsort -dictionary [array names hotkeyButtons]] {
+        if {[info exists settings($var)] && $settings($var) ne ""} {
+            set p [HotkeyProblem $settings($var)]
+            if {$p ne ""} {
+                lappend problems($p) "[HotkeyLabel $var] ([HotkeyDisplay $settings($var)])"
+            }
+        }
+    }
+    if {[llength $problems(modifierOnly)]} {
+        lappend status "Ctrl, Alt, Shift or Win alone never work as a hotkey, add a key: [join $problems(modifierOnly) {, }]."
+    }
+    if {[llength $problems(noModifier)]} {
+        lappend status "Hotkeys without Ctrl, Alt, Shift or Win work from every program, even when typing in\
+            another program, and that key can't be typed anywhere else while OMB runs: [join $problems(noModifier) {, }]."
     }
     # (space: keeps the one line height when empty)
     .hotkeys.status configure -text [expr {[llength $status] ? [join $status "\n"] : " "}]
