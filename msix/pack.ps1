@@ -17,6 +17,13 @@ New-Item -ItemType Directory $Dir | Out-Null
 Copy-Item $Exe (Join-Path $Dir OpenMultiBoxing.exe)
 Set-Content (Join-Path $Dir OpenMultiBoxing.store) 'Microsoft Store install: settings in Documents\OpenMultiBoxing'
 Copy-Item -Recurse (Join-Path $PSScriptRoot Assets) (Join-Path $Dir Assets)
+# Square44x44Logo icons: *_altform-unplated (gray boxes) for dark mode, *_altform-lightunplated (black) for light mode,
+# and plain targetsize copies of the black ones: Windows skips an unplated icon it finds too dark for the background
+# (the black one in dark mode, at 256px in the Start search preview) and without these falls back to the blurry 44px
+# Square44x44Logo.png
+Get-ChildItem (Join-Path $Dir Assets) -Filter '*_altform-lightunplated.png' | ForEach-Object {
+    Copy-Item $_.FullName (Join-Path $_.DirectoryName ($_.Name -replace '_altform-lightunplated', ''))
+}
 # copied to Documents\OpenMultiBoxing by the app (StoreCopyFiles)
 New-Item -ItemType Directory (Join-Path $Dir Files) | Out-Null
 foreach ($f in 'launchwow.bat', 'launchwowc.bat', 'launchwowf.bat', 'LaunchWoW.txt') {
