@@ -5441,10 +5441,11 @@ proc RotateBarUpdate {} {
     set a [ttk::label $t.any -text "⟳ Any key" -padding {6 0}]
     pack $a -side left -fill y -padx 2 -pady 2
     bind $a <Enter> {if {"%m" eq "NotifyNormal"} RotateAnyEnter}
-    bind $a <Leave> {if {"%m" eq "NotifyNormal"} RotateAnyLeave}
+    # (Leave also comes while the mouse is still there, e.g. when the bar gets activated)
+    bind $a <Leave> {after 50 RotateAnyLeaveCheck}
     bind $a <KeyPress> {RotateAnyKey %k 0; break}
     bind $a <KeyRelease> {RotateAnyKey %k 1; break}
-    tooltip $a "While the mouse is here, each key you press (with Shift/Ctrl/Alt held)\ngoes to one game window only, taking turns (each key has its own turns)"
+    # (no tooltips in the bar: they would pop over it and activate, while the game has the keyboard)
     set any 0
     for {set n 1} {$n <= [RotateCount]} {incr n} {
         if {[RotateKeyCode $settings(rotateKey$n)] eq ""} {
@@ -5455,14 +5456,12 @@ proc RotateBarUpdate {} {
         bind $b <ButtonRelease-1> [list RotateBarRelease $n]
         bind $b <Button-3> [list RotateBarReset $n]
         pack $b -side left -padx 2 -pady 2
-        tooltip $b "Click: sends [RotateKeyLabel $n] to the window whose turn it is (then the next one's turn)\nRight click: start again from the current window"
         set any 1
     }
     if {!$any} {
         pack [ttk::label $t.none -text "No keys set"] -side left -padx 8 -pady 4
     }
     pack [ttk::button $t.cfg -text "⚙" -width 3 -takefocus 0 -command HotkeysDialog] -side left -padx 2 -pady 2
-    tooltip $t.cfg "Set the keys (Rotate in the Hotkeys window)"
     RotateBarRefresh
     if {[wm state $t] eq "withdrawn"} {
         ShowNoActivate $t
@@ -5526,6 +5525,19 @@ proc RotateAnyEnter {} {
     focus -force $t.any
     $t.any configure -foreground $settings(overlayFocusColor)
     Debug "Rotate any key: on (was $fg)"
+}
+
+proc RotateAnyLeaveCheck {} {
+    set a .rotbar.any
+    if {[winfo exists $a]} {
+        lassign [winfo pointerxy $a] x y
+        set x0 [winfo rootx $a]
+        set y0 [winfo rooty $a]
+        if {$x >= $x0 && $x < $x0 + [winfo width $a] && $y >= $y0 && $y < $y0 + [winfo height $a]} {
+            return
+        }
+    }
+    RotateAnyLeave
 }
 
 proc RotateAnyLeave {} {

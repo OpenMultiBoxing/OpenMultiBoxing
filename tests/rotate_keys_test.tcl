@@ -219,3 +219,17 @@ Check "leaving releases" $posted {{2 65 0} {2 65 1}}
 Check "nothing broadcast" $broadcast {}
 RotateBarReset 1
 Check "bar right click resets" [array get rotNext 57] {}
+
+# The bar builds (button per key, Any key area, settings button)
+proc RotateBarAway {} {return 0}
+proc ShowNoActivate {t} {}
+proc NoActivate {t} {}
+proc UpdateHandles {} {}
+set settings(rotateBarShown) 1
+foreach n {2 3 4 5} {
+    array set settings [list rotateKey$n "" rotateName$n ""]
+}
+RotateBarUpdate
+Check "bar widgets" [lmap w {any b1 b2 cfg} {winfo exists .rotbar.$w}] {1 1 0 1}
+update idletasks
+destroy .rotbar
