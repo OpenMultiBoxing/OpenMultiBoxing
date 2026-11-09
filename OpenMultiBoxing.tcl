@@ -1511,6 +1511,11 @@ proc RegisterAllHotkeys {} {
             RegisterPerWindowHotkey $n "OMB $n"
         }
     }
+    for {set n 1} {$n <= [RotateCount]} {incr n} {
+        if {[info exists settings(rotateKey$n)] && $settings(rotateKey$n) ne ""} {
+            RegisterHotkey "Rotate $n" hk,rotate$n [list RotateHotkey $n]
+        }
+    }
 }
 
 # The user's focus follows mouse choice, also when broadcasting turned it off for now
@@ -1888,6 +1893,7 @@ proc MenuSetup {} {
     $m1 add command -label "New Profile..." -command NewProfile
     $m1 add command -label "Hotkeys..." -command HotkeysDialog
     $m1 add command -label "Mirrors..." -command MirrorsDialog
+    $m1 add checkbutton -label "Rotate bar" -variable settings(rotateBarShown) -command "RotateBarUpdate; SaveSettings"
     $m1 add separator
     $m1 add command -label "Open settings folder" -command OpenSettingsFolder
     $m1 add command -label "Edit raw settings..." -command EditSettings
@@ -2806,7 +2812,8 @@ proc OpenSettingsFolder {} {
 proc HandleHotKey {msg cb} {
     global hotkeyOk rrOn rrLastCode
     Debug "Hotkey ok=$hotkeyOk for $msg - $cb"
-    if {$rrOn} {
+    # (rotate hotkeys: no focus change, and their key may still be down in a window from a repeat)
+    if {$rrOn && ![string match "RotateHotkey *" $cb]} {
         # Release the hotkey's modifiers already broadcast before focus changes
         # and mark the currently held keys as seen so the hotkey's key itself isn't broadcast
         ReleaseBroadcastKeys
@@ -2974,6 +2981,9 @@ proc HotkeyLabel {var} {
     if {[regexp {^hk(\d+),(focus|swap)$} $var all n what]} {
         return "[string totitle $what] window $n"
     }
+    if {[regexp {^hk,rotate(\d+)$} $var all n]} {
+        return "Rotate $n"
+    }
     foreach {v msg cb} $hotkeyList {
         if {$v eq $var} {
             return $msg
@@ -3019,7 +3029,21 @@ proc HotkeysDialog {} {
         bind $tw <Control-z> HotkeysUndo
         grid [ttk::label $tw.l -text "Click a hotkey then press the new key combination (Esc cancels), right click clears it."] \
             -columnspan 2 -padx 8 -pady 4 -sticky w
-        grid [ttk::labelframe $tw.g -text "General"] [ttk::labelframe $tw.w -text "Windows"] -padx 8 -sticky nsew
+        grid [ttk::labelframe $tw.g -text "General"] -row 1 -column 0 -rowspan 2 -padx 8 -sticky nsew
+        grid [ttk::labelframe $tw.w -text "Windows"] -row 1 -column 1 -padx 8 -sticky new
+        grid [ttk::labelframe $tw.r -text "Rotate: each press sends the key to one window, taking turns"] \
+            -row 2 -column 1 -padx 8 -pady {6 0} -sticky new
+        grid [ttk::label $tw.r.hh -text "Hotkey"] [ttk::label $tw.r.hk -text "Key"] [ttk::label $tw.r.hn -text "Name"] -padx 4
+        for {set n 1} {$n <= [RotateCount]} {incr n} {
+            grid [HotkeyButton $tw.r.h$n hk,rotate$n] [ttk::entry $tw.r.k$n -width 8 -textvariable settings(rotateKey$n)] \
+                [ttk::entry $tw.r.n$n -width 14 -textvariable settings(rotateName$n)] -padx 4 -pady 1 -sticky w
+            foreach e [list $tw.r.k$n $tw.r.n$n] {
+                bind $e <Return> RotateSettingsChanged
+                bind $e <FocusOut> RotateSettingsChanged
+            }
+        }
+        tooltip $tw.r.k1 "Key sent (as in the game key bindings), e.g. 9, F, F1, NUMPAD1"
+        tooltip $tw.r.n1 "Name shown in the Rotate bar (File menu), e.g. War Stomp"
         set row 0
         foreach {var msg cb} $hotkeyList {
             grid [ttk::label $tw.g.l$row -text $msg] [HotkeyButton $tw.g.b$row $var] -padx 4 -pady 1 -sticky w
@@ -5132,6 +5156,7 @@ proc RotateKey {n code} {
         return
     }
     set rotNext($code) [expr {$target + 1}]
+    RotateBarRefresh
     if {$target == $n} {
         Debug "Rotated key $code: focused window $n's turn, it got it"
         return
@@ -5163,6 +5188,7 @@ proc RotationAt {slots i} {
 proc RotationsReset {} {
     global rotNext
     array unset rotNext *
+    RotateBarRefresh
 }
 
 # Rotate modifiers: setting name and as shown
@@ -5256,6 +5282,217 @@ proc RotateClear {} {
     set settings(rotateModifier) ""
     RotateModifierUpdate
     SaveSettings
+}
+
+# --- Rotate hotkeys and Rotate bar: settings(rotateKeyN) (N 1..5) sent to one window per hotkey
+# settings(hk,rotateN) press or bar button click, taking turns (same turns as with the rotate modifier).
+# No window got the key for real, so every turn is sent, the current window's too, without delay.
+
+proc RotateCount {} {
+    return 5
+}
+
+# Key code for a key name (as in the key lists: 9, F, F1, NUMPAD1...), empty when unknown
+proc RotateKeyCode {k} {
+    twapi::_init_vk_map
+    if {$k eq ""} {
+        return
+    }
+    if {[string length $k] == 1} {
+        lassign [twapi::VkKeyScan $k] x code
+        return [expr {$code > 0 ? $code & 0xFF : ""}]
+    }
+    set k [string toupper $k]
+    if {[info exists twapi::vk_map($k)]} {
+        return [expr [lindex $twapi::vk_map($k) 0]]
+    }
+}
+
+# Window whose turn it is for key code: the next one, else the focused game window, else main.
+# With advance, it's taken (the turn goes to the next one).
+proc RotateTarget {code {advance 1}} {
+    global slot2handle rotNext
+    set skip [RRExcludedWindows]
+    set slots {}
+    foreach i [lsort -integer [array names slot2handle]] {
+        if {$i ni $skip} {
+            lappend slots $i
+        }
+    }
+    if {[info exists rotNext($code)]} {
+        set target [RotationAt $slots $rotNext($code)]
+    } else {
+        set target [FocusIn]
+        if {$target ni $slots} {
+            set target [RotationAt $slots [SlotAtPosition 1]]
+        }
+    }
+    if {$advance && $target ne ""} {
+        set rotNext($code) [expr {$target + 1}]
+    }
+    return $target
+}
+
+# Key down to the window whose turn it is, returns that window
+proc RotateDown {code} {
+    set t [RotateTarget $code]
+    if {$t ne ""} {
+        Debug "Rotate: sending $code down to $t"
+        PostKeyToSlot $t $code 0
+    }
+    RotateBarRefresh
+    return $t
+}
+
+proc RotateUp {t code} {
+    global sentDown
+    if {[info exists sentDown($t,$code)]} {
+        Debug "Rotate: sending $code up to $t"
+        PostKeyToSlot $t $code 1
+    }
+}
+
+# Rotate hotkey n pressed (also repeated by Windows while held): down now, up when the hotkey's key is let go
+proc RotateHotkey {n} {
+    global settings rotHotkeyDown
+    if {[info exists rotHotkeyDown($n)]} {
+        return
+    }
+    set code [RotateKeyCode $settings(rotateKey$n)]
+    if {$code eq ""} {
+        return
+    }
+    set t [RotateDown $code]
+    if {$t eq ""} {
+        return
+    }
+    lassign [HotkeyToModsVk $settings(hk,rotate$n)] mods vk
+    set rotHotkeyDown($n) [list $t $code $vk]
+    after 10 [list RotateHotkeyWatch $n]
+}
+
+proc RotateHotkeyWatch {n} {
+    global rotHotkeyDown
+    lassign $rotHotkeyDown($n) t code vk
+    if {$vk ne "" && ([twapi::GetAsyncKeyState $vk] & 0x8000)} {
+        after 10 [list RotateHotkeyWatch $n]
+        return
+    }
+    unset rotHotkeyDown($n)
+    RotateUp $t $code
+}
+
+# Rotate settings changed in the Hotkeys dialog
+proc RotateSettingsChanged {} {
+    global settings hotkeyNote
+    set bad {}
+    for {set n 1} {$n <= [RotateCount]} {incr n} {
+        set k [string trim $settings(rotateKey$n)]
+        set settings(rotateKey$n) $k
+        if {$k ne "" && [RotateKeyCode $k] eq ""} {
+            lappend bad "Rotate $n: \"$k\" isn't a key name (e.g. 9, F, F1, NUMPAD1)."
+        }
+    }
+    set hotkeyNote $bad
+    SaveSettings
+    RegisterAllHotkeys
+    HotkeysDialogRefresh
+    RotateBarUpdate
+}
+
+# The Rotate bar: always on top, doesn't take the focus from the game when clicked
+proc RotateBarToggle {} {
+    global settings
+    set settings(rotateBarShown) [expr {!$settings(rotateBarShown)}]
+    RotateBarUpdate
+    SaveSettings
+}
+
+# Shows/hides the bar and (re)makes its buttons
+proc RotateBarUpdate {} {
+    global settings
+    set t .rotbar
+    if {!$settings(rotateBarShown)} {
+        if {[winfo exists $t]} {
+            wm withdraw $t
+        }
+        return
+    }
+    if {![winfo exists $t]} {
+        toplevel $t
+        wm withdraw $t
+        wm title $t "OMB Rotate"
+        wm resizable $t 0 0
+        wm attributes $t -topmost 1
+        wm protocol $t WM_DELETE_WINDOW RotateBarToggle
+        RememberGeometry $t rotateBarGeometry
+        update idletasks
+        NoActivate $t
+        UpdateHandles
+    }
+    foreach w [winfo children $t] {
+        destroy $w
+    }
+    set any 0
+    for {set n 1} {$n <= [RotateCount]} {incr n} {
+        if {[RotateKeyCode $settings(rotateKey$n)] eq ""} {
+            continue
+        }
+        set b [ttk::button $t.b$n -takefocus 0 -width 16]
+        bind $b <ButtonPress-1> [list RotateBarPress $n]
+        bind $b <ButtonRelease-1> [list RotateBarRelease $n]
+        pack $b -side left -padx 2 -pady 2
+        tooltip $b "Click: sends [RotateKeyLabel $n] to the window whose turn it is (then the next one's turn)\nSet in File > Hotkeys..., Rotate"
+        set any 1
+    }
+    if {!$any} {
+        pack [ttk::label $t.none -text "No keys to rotate: set them in File > Hotkeys..., Rotate"] -padx 8 -pady 4
+    }
+    RotateBarRefresh
+    wm deiconify $t
+}
+
+proc RotateKeyLabel {n} {
+    global settings
+    if {$settings(rotateName$n) ne ""} {
+        return "$settings(rotateName$n) ($settings(rotateKey$n))"
+    }
+    return $settings(rotateKey$n)
+}
+
+# Button texts with whose turn it is
+proc RotateBarRefresh {} {
+    global settings
+    if {![winfo exists .rotbar]} {
+        return
+    }
+    for {set n 1} {$n <= [RotateCount]} {incr n} {
+        if {![winfo exists .rotbar.b$n]} {
+            continue
+        }
+        set next [RotateTarget [RotateKeyCode $settings(rotateKey$n)] 0]
+        .rotbar.b$n configure -text "[RotateKeyLabel $n] → $next"
+    }
+}
+
+proc RotateBarPress {n} {
+    global settings rotBarDown
+    set code [RotateKeyCode $settings(rotateKey$n)]
+    if {$code eq ""} {
+        return
+    }
+    set t [RotateDown $code]
+    if {$t ne ""} {
+        set rotBarDown($n) [list $t $code]
+    }
+}
+
+proc RotateBarRelease {n} {
+    global rotBarDown
+    if {[info exists rotBarDown($n)]} {
+        RotateUp {*}$rotBarDown($n)
+        unset rotBarDown($n)
+    }
 }
 
 # --- Skip windows: windows (OMB numbers, so it follows them when swapped) that don't get broadcast keys/clicks
@@ -7637,6 +7874,10 @@ array set settings {
     mirrorsShown 1
     hk,mirrorsToggle ""
     hk,mirrorsEdit ""
+    rotateBarShown 0
+}
+for {set n 1} {$n <= [RotateCount]} {incr n} {
+    array set settings [list hk,rotate$n "" rotateKey$n "" rotateName$n ""]
 }
 
 set settings(mouseInsideGameWindowFocuses) [expr {$hasRR||$hasBR}]
@@ -7795,6 +8036,7 @@ if {$settings(clipboardAtStart)} {
 # Mouse tracking/auto pause and auto capture
 Defer 350 PeriodicChecks
 Defer 400 MirrorsRebuild
+Defer 450 RotateBarUpdate
 
 # For now not using cffi as it doesn't read full keyboard state anyway
 #Defer 300 CheckBinary
