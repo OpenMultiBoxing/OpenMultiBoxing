@@ -187,3 +187,18 @@ RotateBarPress 1
 RotateBarRelease 1
 Check "wraps to 1" $posted {{1 57 0} {1 57 1}}
 Check "key names" [list [RotateKeyCode 9] [RotateKeyCode f1] [RotateKeyCode NUMPAD1] [RotateKeyCode bogus]] {57 112 97 {}}
+
+# Mouse over the bar's "Any key" area: keys rotate like with the modifier held
+set settings(broadcastDelay) 0
+unset held([expr {$RSHIFT}])
+Step
+array set rotNext {}
+set broadcast {}
+set rotHover 1
+Check "hover: current window got it" [Press 0x39] {}
+Check "hover: next" [Press 0x39] {{3 57 0} {3 57 1}}
+Check "hover: not broadcast" $broadcast {}
+set rotHover 0
+Check "no hover: broadcast" [list [Press 0x39] $broadcast] {{} {{57 0} {57 1}}}
+RotateBarReset 1
+Check "bar right click resets" [array get rotNext 57] {}

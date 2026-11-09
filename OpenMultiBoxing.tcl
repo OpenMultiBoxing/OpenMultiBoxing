@@ -3042,6 +3042,9 @@ proc HotkeysDialog {} {
                 bind $e <FocusOut> RotateSettingsChanged
             }
         }
+        grid [ttk::checkbutton $tw.r.bar -text "Show the Rotate bar" \
+            -variable settings(rotateBarShown) -command "RotateBarUpdate; SaveSettings"] -columnspan 3 -padx 4 -pady 2 -sticky w
+        tooltip $tw.r.bar "Always on top bar (also in the File menu) with a button per key showing whose turn it is,\nand an \"Any key\" area: with the mouse there, keys pressed in the game rotate"
         tooltip $tw.r.k1 "Key sent (as in the game key bindings), e.g. 9, F, F1, NUMPAD1"
         tooltip $tw.r.n1 "Name shown in the Rotate bar (File menu), e.g. War Stomp"
         set row 0
@@ -4961,6 +4964,7 @@ proc FocusIn {} {
 proc RRCheck {} {
     global rrCodes rrExcludes rrLastCode rrTaskId settings maxNumW slot2position
     global rrPendingMods rrSentDown hotkeyCombo rrLastFocus broadcastMap rotateCode rotDown sentDown excludedKeyCode
+    global rotHover
     set rrTaskId [after $settings(rrInterval) RRCheck]
     #Debug "RR Check..."
     set n [FocusIn]
@@ -4996,7 +5000,9 @@ proc RRCheck {} {
         }
     }
     # the rotate modifier pauses broadcasting too, keys pressed then go to one window
-    set rotating [expr {$rotateCode ne "" && ([twapi::GetAsyncKeyState $rotateCode] & 0x8000)}]
+    # (or with the mouse over the Rotate bar's "Any key" area)
+    set rotating [expr {($rotateCode ne "" && ([twapi::GetAsyncKeyState $rotateCode] & 0x8000))
+        || ([info exists rotHover] && $rotHover)}]
     foreach code $newUp {
         unset -nocomplain rrPendingMods($code)
         if {[info exists rotDown($code)]} {
@@ -5410,9 +5416,11 @@ proc RotateBarToggle {} {
 
 # Shows/hides the bar and (re)makes its buttons
 proc RotateBarUpdate {} {
-    global settings
+    global settings rotHover
     set t .rotbar
-    if {!$settings(rotateBarShown)} {
+    set rotHover 0
+    # (tool windows show on every virtual desktop: follows the main game window's, else ours)
+    if {![info exists settings(rotateBarShown)] || !$settings(rotateBarShown) || [RotateBarAway]} {
         if {[winfo exists $t]} {
             wm withdraw $t
         }
@@ -5433,6 +5441,11 @@ proc RotateBarUpdate {} {
     foreach w [winfo children $t] {
         destroy $w
     }
+    set a [ttk::label $t.any -text "⟳ Any key" -padding {6 0}]
+    pack $a -side left -fill y -padx 2 -pady 2
+    bind $a <Enter> {RotateHover 1}
+    bind $a <Leave> {RotateHover 0}
+    tooltip $a "While the mouse is here (with broadcasting on), each key pressed\nin the game goes to the current window and, from the second press on,\nalso to one other window, taking turns, like with the Rotate Modifier held"
     set any 0
     for {set n 1} {$n <= [RotateCount]} {incr n} {
         if {[RotateKeyCode $settings(rotateKey$n)] eq ""} {
@@ -5441,15 +5454,44 @@ proc RotateBarUpdate {} {
         set b [ttk::button $t.b$n -takefocus 0 -width 16]
         bind $b <ButtonPress-1> [list RotateBarPress $n]
         bind $b <ButtonRelease-1> [list RotateBarRelease $n]
+        bind $b <Button-3> [list RotateBarReset $n]
         pack $b -side left -padx 2 -pady 2
-        tooltip $b "Click: sends [RotateKeyLabel $n] to the window whose turn it is (then the next one's turn)\nSet in File > Hotkeys..., Rotate"
+        tooltip $b "Click: sends [RotateKeyLabel $n] to the window whose turn it is (then the next one's turn)\nRight click: start again from the current window"
         set any 1
     }
     if {!$any} {
-        pack [ttk::label $t.none -text "No keys to rotate: set them in File > Hotkeys..., Rotate"] -padx 8 -pady 4
+        pack [ttk::label $t.none -text "No keys set"] -side left -padx 8 -pady 4
     }
+    pack [ttk::button $t.cfg -text "⚙" -width 3 -takefocus 0 -command HotkeysDialog] -side left -padx 2 -pady 2
+    tooltip $t.cfg "Set the keys (Rotate in the Hotkeys window)"
     RotateBarRefresh
     wm deiconify $t
+}
+
+# Bar hidden when the main game window (else ours) is on another virtual desktop
+proc RotateBarAway {} {
+    global slot2handle
+    set n [SlotAtPosition 1]
+    if {$n ne "" && [info exists slot2handle($n)]} {
+        return [OnOtherDesktopN $n]
+    }
+    OnOtherDesktopN main
+}
+
+# Mouse over the bar's "Any key" area: keys pressed rotate (see RRCheck)
+proc RotateHover {on} {
+    global rotHover settings
+    set rotHover $on
+    if {[winfo exists .rotbar.any]} {
+        .rotbar.any configure -foreground [expr {$on ? $settings(overlayFocusColor) : ""}]
+    }
+}
+
+# Turns of bar key n start again from the current window
+proc RotateBarReset {n} {
+    global settings rotNext
+    unset -nocomplain rotNext([RotateKeyCode $settings(rotateKey$n)])
+    RotateBarRefresh
 }
 
 proc RotateKeyLabel {n} {
@@ -6672,6 +6714,7 @@ proc DesktopCheck {} {
     set desktopAway $away
     MirrorsRefreshAll
     OverlayUpdate
+    RotateBarUpdate
 }
 
 proc OnOtherDesktopN {n} {
