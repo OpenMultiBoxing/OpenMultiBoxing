@@ -5,6 +5,7 @@ LoadProcs $env(OMB_TEST_APP)
 array set netDown {}
 array set rrSentDown {}
 array set rrPendingMods {}
+set rotateCode {}
 
 proc Debug {msg} {}
 array set held {}
