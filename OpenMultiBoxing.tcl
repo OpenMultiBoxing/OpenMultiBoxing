@@ -5519,12 +5519,29 @@ proc RotateAnyEnter {} {
     set wh [list [expr {[wm frame $t]}] HWND]
     lassign [twapi::get_window_style $wh] style exstyle
     twapi::set_window_style $wh $style [expr {$exstyle & ~0x08000000}]
-    if {[catch {Foreground $wh} err]} {
+    if {[catch {ForegroundForced $wh $fg} err] || !$err} {
         Debug "Rotate any key: couldn't activate the bar: $err"
     }
     focus -force $t.any
     $t.any configure -foreground $settings(overlayFocusColor)
     Debug "Rotate any key: on (was $fg)"
+}
+
+# Windows only lets the program that got the last input (key, click) take the foreground, else it just
+# flashes the window: attached to the input of the foreground window's thread we're allowed to.
+# Returns 1 when done.
+proc ForegroundForced {wh fg} {
+    set me [twapi::GetCurrentThreadId]
+    set tid [expr {$fg eq "" ? $me : [twapi::get_window_thread $fg]}]
+    set attached [expr {$tid != $me && [twapi::AttachThreadInput $me $tid 1]}]
+    try {
+        set ok [twapi::SetForegroundWindow $wh]
+    } finally {
+        if {$attached} {
+            twapi::AttachThreadInput $me $tid 0
+        }
+    }
+    return [expr {$ok ? 1 : 0}]
 }
 
 proc RotateAnyLeaveCheck {} {
