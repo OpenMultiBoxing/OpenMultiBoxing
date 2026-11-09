@@ -155,3 +155,82 @@ RotateClear
 Check "cleared" [list $settings(rotateModifier) $rotateText $rotateCode] {{} None {}}
 update idletasks
 destroy .rotb
+
+# Rotate hotkeys / bar: every turn is sent (current window included), no delay, up on release
+proc RotateBarRefresh {} {}
+array set settings {rotateKey1 9 rotateName1 "War Stomp" hk,rotate1 Ctrl-Alt-F1 broadcastDelay 100}
+array set rotNext {}
+set focused 2
+set posted {}
+RotateBarPress 1
+Check "bar: current window first, down now" $posted {{2 57 0}}
+RotateBarRelease 1
+Check "bar: up on release" $posted {{2 57 0} {2 57 1}}
+set posted {}
+RotateBarPress 1
+RotateBarRelease 1
+Check "bar: then next" $posted {{3 57 0} {3 57 1}}
+set posted {}
+set held(112) 1
+RotateHotkey 1
+RotateHotkey 1
+Check "hotkey: next window, repeat ignored" $posted {{4 57 0}}
+after 50 {set waited 1}
+vwait waited
+Check "hotkey: still held" $posted {{4 57 0}}
+unset held(112)
+after 50 {set waited 1}
+vwait waited
+Check "hotkey: up on release" $posted {{4 57 0} {4 57 1}}
+set posted {}
+RotateBarPress 1
+RotateBarRelease 1
+Check "wraps to 1" $posted {{1 57 0} {1 57 1}}
+Check "key names" [list [RotateKeyCode 9] [RotateKeyCode f1] [RotateKeyCode NUMPAD1] [RotateKeyCode bogus]] {57 112 97 {}}
+
+# The bar's "Any key" area (it has the keyboard): each key with the modifiers held goes to one window,
+# taking turns per key, held as long as the key, no delay
+set settings(broadcastDelay) 100
+unset held([expr {$RSHIFT}])
+Step
+array set rotNext {}
+set posted {}
+RotateAnyKey 57 0
+RotateAnyKey 57 0
+Check "any key: current window, repeat ignored" $posted {{2 57 0}}
+RotateAnyKey 57 1
+Check "any key: up" $posted {{2 57 0} {2 57 1}}
+set posted {}
+set held(160) 1
+RotateAnyKey 160 0
+Check "any key: shift alone not sent" $posted {}
+RotateAnyKey 57 0
+RotateAnyKey 57 1
+RotateAnyKey 160 1
+unset held(160)
+Check "any key: shift-9 to the next window" $posted {{3 160 0} {3 57 0} {3 57 1} {3 160 1}}
+set posted {}
+RotateAnyKey 65 0
+Check "any key: other key, own turns" $posted {{2 65 0}}
+set rotAnyArmed ""
+set rotAnyPrev ""
+proc Foreground {w} {}
+RotateAnyLeave
+Check "leaving releases" $posted {{2 65 0} {2 65 1}}
+Check "nothing broadcast" $broadcast {}
+RotateBarReset 1
+Check "bar right click resets" [array get rotNext 57] {}
+
+# The bar builds (button per key, Any key area, settings button)
+proc RotateBarAway {} {return 0}
+proc ShowNoActivate {t} {}
+proc NoActivate {t} {}
+proc UpdateHandles {} {}
+set settings(rotateBarShown) 1
+foreach n {2 3 4 5} {
+    array set settings [list rotateKey$n "" rotateName$n ""]
+}
+RotateBarUpdate
+Check "bar widgets" [lmap w {any b1 b2 cfg} {winfo exists .rotbar.$w}] {1 1 0 1}
+update idletasks
+destroy .rotbar
