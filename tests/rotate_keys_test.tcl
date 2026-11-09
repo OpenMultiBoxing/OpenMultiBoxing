@@ -28,7 +28,7 @@ proc PostKeyMessage {i code up} {global posted; lappend posted [list $i $code $u
 set RSHIFT 0xA1
 set RCTRL 0xA3
 array set settings {rrInterval 1000000 rrDeferModifiers 1 rotateModifier RSHIFT rrExcludeWindowsOn 1
-    rrExcludeWindows {}}
+    rrExcludeWindows {} broadcastDelay 0 broadcastDelayModifiersFlush 0}
 foreach i {1 2 3 4} {
     set slot2handle($i) w$i
     set slot2focus($i) f$i
@@ -37,7 +37,8 @@ set rrExcludes [list [expr {$RSHIFT}] [expr {$RCTRL}]]
 RotateModifierUpdate
 Check "rotate modifier" [list $rotateCode $rotateText] [list [expr {$RSHIFT}] "Right Shift"]
 set rrLastFocus 1
-ResetIgnoredKeys {}
+# A is in the "all but these keys" list
+ResetIgnoredKeys {65}
 set rrLastCode [GetKeyboardState]
 
 proc Step {} {RRCheck; global rrTaskId; after cancel $rrTaskId}
@@ -76,6 +77,16 @@ Check "still nothing broadcast" $broadcast {}
 Check "normal broadcast without modifier" [Press 0x39] {}
 Check "broadcast" $broadcast {{57 0} {57 1}}
 set broadcast {}
+# keys not broadcast (A) still rotate
+Check "A not broadcast" [list [Press 65] $broadcast] {{} {}}
+set held([expr {$RSHIFT}]) 1
+Step
+Check "A rotates: focused window" [Press 65] {}
+Check "A rotates: next" [Press 65] {{2 65 0} {2 65 1}}
+Check "A: nothing broadcast" $broadcast {}
+unset held([expr {$RSHIFT}])
+Step
+Check "A not broadcast after" [list [Press 65] $broadcast] {{} {}}
 
 # swap: starts again at the focused window
 set held([expr {$RSHIFT}]) 1
@@ -98,6 +109,19 @@ Check "focused (2) got it" [Press 0x39] {}
 Check "no broadcast while rotating" $broadcast {}
 unset held([expr {$RSHIFT}])
 Step
+
+# with the broadcast delay: sent later, down and up
+set settings(broadcastDelay) 50
+set held([expr {$RSHIFT}]) 1
+Step
+Check "delayed: nothing yet" [Press 0x39] {}
+Check "delayed: pending" [array size bcPending] 2
+after 300 {set waited 1}
+vwait waited
+Check "delayed: sent" $posted {{3 57 0} {3 57 1}}
+unset held([expr {$RSHIFT}])
+Step
+set settings(broadcastDelay) 0
 
 # no rotate modifier: Right Shift just pauses as before
 set settings(rotateModifier) ""
