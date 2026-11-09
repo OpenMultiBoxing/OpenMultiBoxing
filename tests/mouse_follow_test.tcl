@@ -38,6 +38,10 @@ set rrOn 0
 set mouseBroadcast 0
 set networkPause 0
 set lastFocusWindow 1
+
+# Exit before the startup read Windows' setting (another copy running): nothing changed, no error
+RevertMouseFollow
+Check "exit before start" [list $ffm $delays] {{} {}}
 set isPaused 0
 set pauseSchedule {}
 
