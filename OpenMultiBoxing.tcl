@@ -5464,7 +5464,27 @@ proc RotateBarUpdate {} {
     pack [ttk::button $t.cfg -text "⚙" -width 3 -takefocus 0 -command HotkeysDialog] -side left -padx 2 -pady 2
     tooltip $t.cfg "Set the keys (Rotate in the Hotkeys window)"
     RotateBarRefresh
-    wm deiconify $t
+    if {[wm state $t] eq "withdrawn"} {
+        wm deiconify $t
+    }
+}
+
+# Only shows/hides the bar (virtual desktop changes: no rebuild, no re-show, the switch reports several changes)
+proc RotateBarShow {} {
+    global settings
+    set t .rotbar
+    if {![winfo exists $t]} {
+        RotateBarUpdate
+        return
+    }
+    set want [expr {[info exists settings(rotateBarShown)] && $settings(rotateBarShown) && ![RotateBarAway]}]
+    set shown [expr {[wm state $t] ne "withdrawn"}]
+    if {$want && !$shown} {
+        wm deiconify $t
+    } elseif {!$want && $shown} {
+        RotateAnyLeave
+        wm withdraw $t
+    }
 }
 
 # Bar hidden when the main game window (else ours) is on another virtual desktop
@@ -6792,7 +6812,7 @@ proc DesktopCheck {} {
     set desktopAway $away
     MirrorsRefreshAll
     OverlayUpdate
-    RotateBarUpdate
+    RotateBarShow
 }
 
 proc OnOtherDesktopN {n} {
