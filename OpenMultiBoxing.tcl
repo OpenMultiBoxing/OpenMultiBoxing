@@ -1677,7 +1677,7 @@ proc UISetup {} {
         bind .rotb <KeyPress> {if {[RotateCaptureKey %k 0]} break}
         bind .rotb <KeyRelease> {if {[RotateCaptureKey %k 1]} break}
         bind .rotb <FocusOut> RotateCaptureEnd
-        tooltip .rotb "While $rrlabel is on, hold this key and press a key several times:\nthe first press goes to the current window only, each next press to the next window only\n(e.g. to take turns with a stun). Swapping windows starts again from the current one.\nClick then press Shift, Ctrl or Alt to change it, right click to remove it."
+        tooltip .rotb "While $rrlabel is on, hold this key and press a key several times (e.g. to take turns with a stun):\neach press goes to the current window (with this key held) and, from the second press on,\nalso to one other window, taking turns (the current window's own turn: just it).\nSwapping windows starts again.\nClick then press Shift, Ctrl or Alt to change it, right click to remove it."
         RotateModifierUpdate
 
         grid [ttk::label .lBMap -text "Key remapping (: separated list)"] -padx 4 -columnspan 2 -sticky w
@@ -5100,8 +5100,9 @@ proc HeldModifiersMask {} {
     return $mask
 }
 
-# --- Rotation: with the rotate modifier (Right Shift by default) held, each press of a key goes to one
-# window: the focused one (it gets the key for real), then the next ones by OMB number (not skipped ones)
+# --- Rotation: with the rotate modifier (Right Shift by default) held, the focused window gets each press for
+# real (with the modifier, WoW then does the key's action), and from the second press on one other window gets
+# it too, taking turns by OMB number (not skipped ones)
 
 # Key code pressed in focused window n with the rotate modifier held: post it to that key's next window
 proc RotateKey {n code} {
