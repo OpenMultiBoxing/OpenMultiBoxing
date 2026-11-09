@@ -212,6 +212,7 @@ Check "any key: shift-9 to the next window" $posted {{3 160 0} {3 57 0} {3 57 1}
 set posted {}
 RotateAnyKey 65 0
 Check "any key: other key, own turns" $posted {{2 65 0}}
+set rotAnyArmed ""
 set rotAnyPrev ""
 proc Foreground {w} {}
 RotateAnyLeave

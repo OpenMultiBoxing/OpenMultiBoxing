@@ -5443,9 +5443,12 @@ proc RotateBarUpdate {} {
     bind $a <Enter> {if {"%m" eq "NotifyNormal"} RotateAnyEnter}
     # (Leave also comes while the mouse is still there, e.g. when the bar gets activated)
     bind $a <Leave> {after 50 RotateAnyLeaveCheck}
-    bind $a <KeyPress> {RotateAnyKey %k 0; break}
-    bind $a <KeyRelease> {RotateAnyKey %k 1; break}
-    # (no tooltips in the bar: they would pop over it and activate, while the game has the keyboard)
+    bind $a <ButtonPress-1> RotateAnyOn
+    bind $t <FocusIn> {if {"%W" eq ".rotbar"} RotateAnyOn}
+    # (on the bar: keys go to whichever of its widgets has the focus)
+    bind $t <KeyPress> {if {[info exists rotAnyPrev]} {RotateAnyKey %k 0}; break}
+    bind $t <KeyRelease> {if {[info exists rotAnyPrev]} {RotateAnyKey %k 1}; break}
+    tooltip $a "Click here: then (until the mouse leaves) each key you press, with Shift/Ctrl/Alt held,\ngoes to one game window only, taking turns (each key has its own turns)"
     set any 0
     for {set n 1} {$n <= [RotateCount]} {incr n} {
         if {[RotateKeyCode $settings(rotateKey$n)] eq ""} {
@@ -5502,46 +5505,38 @@ proc RotateBarAway {} {
     OnOtherDesktopN main
 }
 
-# Mouse over the bar's "Any key" area: the bar takes the keyboard (so no game window gets the keys), each
-# key with the modifiers held goes to one window, taking turns per key; the previous foreground window
-# (rotAnyPrev) gets it back when the mouse leaves
+# The bar's "Any key" area: clicked (Windows only lets a program take the keyboard from another one after
+# a click or key in it, or with its own focus follows mouse), the bar has the keyboard so no game window gets
+# the keys: each key with the modifiers held goes to one window, taking turns per key. When the mouse
+# leaves, the window that had the keyboard before (rotAnyPrev, set while on) gets it back.
+# rotAnyArmed: mouse in the area (the bar can be activated then), the window in front at that time.
 proc RotateAnyEnter {} {
-    global rotAnyPrev settings
+    global rotAnyArmed
     set t .rotbar
-    if {[info exists rotAnyPrev] || ![winfo exists $t.any]} {
+    if {[info exists rotAnyArmed] || ![winfo exists $t.any]} {
         return
     }
     if {[catch {twapi::get_foreground_window} fg]} {
         set fg ""
     }
-    set rotAnyPrev $fg
-    # (activating: not with WS_EX_NOACTIVATE)
+    set rotAnyArmed $fg
+    # (so the click activates it)
     set wh [list [expr {[wm frame $t]}] HWND]
     lassign [twapi::get_window_style $wh] style exstyle
     twapi::set_window_style $wh $style [expr {$exstyle & ~0x08000000}]
-    if {[catch {ForegroundForced $wh $fg} err] || !$err} {
-        Debug "Rotate any key: couldn't activate the bar: $err"
-    }
-    focus -force $t.any
-    $t.any configure -foreground $settings(overlayFocusColor)
-    Debug "Rotate any key: on (was $fg)"
+    Debug "Rotate any key: mouse in (in front: $fg)"
 }
 
-# Windows only lets the program that got the last input (key, click) take the foreground, else it just
-# flashes the window: attached to the input of the foreground window's thread we're allowed to.
-# Returns 1 when done.
-proc ForegroundForced {wh fg} {
-    set me [twapi::GetCurrentThreadId]
-    set tid [expr {$fg eq "" ? $me : [twapi::get_window_thread $fg]}]
-    set attached [expr {$tid != $me && [twapi::AttachThreadInput $me $tid 1]}]
-    try {
-        set ok [twapi::SetForegroundWindow $wh]
-    } finally {
-        if {$attached} {
-            twapi::AttachThreadInput $me $tid 0
-        }
+# Clicked, or the bar activated by Windows' focus follows mouse, with the mouse in the area: on
+proc RotateAnyOn {} {
+    global rotAnyArmed rotAnyPrev settings
+    if {![info exists rotAnyArmed] || [info exists rotAnyPrev]} {
+        return
     }
-    return [expr {$ok ? 1 : 0}]
+    set rotAnyPrev $rotAnyArmed
+    focus -force .rotbar.any
+    .rotbar.any configure -foreground $settings(overlayFocusColor)
+    Debug "Rotate any key: on (was $rotAnyPrev)"
 }
 
 proc RotateAnyLeaveCheck {} {
@@ -5558,19 +5553,25 @@ proc RotateAnyLeaveCheck {} {
 }
 
 proc RotateAnyLeave {} {
-    global rotAnyPrev rotAnyDown
-    if {![info exists rotAnyPrev]} {
+    global rotAnyPrev rotAnyArmed rotAnyDown
+    if {![info exists rotAnyArmed]} {
         return
     }
-    foreach vk [array names rotAnyDown] {
-        RotateAnyKey $vk 1
-    }
+    unset rotAnyArmed
     set t .rotbar
     if {[winfo exists $t.any]} {
         NoActivate $t
         $t.any configure -foreground ""
     }
+    if {![info exists rotAnyPrev]} {
+        Debug "Rotate any key: mouse out"
+        return
+    }
+    foreach vk [array names rotAnyDown] {
+        RotateAnyKey $vk 1
+    }
     Debug "Rotate any key: off, back to $rotAnyPrev"
+    # (allowed: the bar is in front)
     if {$rotAnyPrev ne ""} {
         catch {Foreground $rotAnyPrev}
     }
