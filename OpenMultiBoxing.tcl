@@ -1677,7 +1677,7 @@ proc UISetup {} {
         bind .rotb <KeyPress> {if {[RotateCaptureKey %k 0]} break}
         bind .rotb <KeyRelease> {if {[RotateCaptureKey %k 1]} break}
         bind .rotb <FocusOut> RotateCaptureEnd
-        tooltip .rotb "While $rrlabel is on, hold this key and press a key several times (e.g. to take turns with a stun):\neach press goes to the current window (with this key held) and, from the second press on,\nalso to one other window, taking turns (the current window's own turn: just it).\nSwapping windows starts again.\nClick then press Shift, Ctrl or Alt to change it, right click to remove it."
+        tooltip .rotb "While $rrlabel is on, hold this key and press a key several times (e.g. to take turns with a stun,\nany key, even the ones not broadcast):\neach press goes to the current window (with this key held) and, from the second press on,\nalso to one other window, taking turns (the current window's own turn: just it).\nSwapping windows starts again.\nClick then press Shift, Ctrl or Alt to change it, right click to remove it."
         RotateModifierUpdate
 
         grid [ttk::label .lBMap -text "Key remapping (: separated list)"] -padx 4 -columnspan 2 -sticky w
@@ -4864,10 +4864,14 @@ proc RRKeysListChange {} {
 
 set rrLastCode {}
 
+# ignoredKeyCode: keys never broadcast, excludedKeyCode: those from the "all but these keys" list, still
+# watched as they rotate (with the rotate modifier held)
 proc ResetIgnoredKeys {codes} {
-    global ignoredKeyCode
+    global ignoredKeyCode excludedKeyCode
     catch {unset ignoredKeyCode}
     array set ignoredKeyCode {}
+    array unset excludedKeyCode
+    array set excludedKeyCode {}
     for {set i 0} {$i <= 7} {incr i} {
         set ignoredKeyCode($i) 1
     }
@@ -4877,15 +4881,16 @@ proc ResetIgnoredKeys {codes} {
     }
     foreach code $codes {
         set ignoredKeyCode($code) 1
+        set excludedKeyCode($code) 1
     }
     Debug "ResetIgnoredKeys [array names ignoredKeyCode]"
 }
 
 proc GetKeyboardState {} {
-    global ignoredKeyCode
+    global ignoredKeyCode excludedKeyCode
     set res {}
     for {set i 0} {$i <= 254} {incr i} {
-        if {[info exists ignoredKeyCode($i)]} {
+        if {[info exists ignoredKeyCode($i)] && ![info exists excludedKeyCode($i)]} {
             lappend res 0
         } else {
             lappend res [expr {[twapi::GetAsyncKeyState $i]>0}]
@@ -4931,7 +4936,7 @@ proc FocusIn {} {
 # Main broadcast setup
 proc RRCheck {} {
     global rrCodes rrExcludes rrLastCode rrTaskId settings maxNumW slot2position
-    global rrPendingMods rrSentDown hotkeyCombo rrLastFocus broadcastMap rotateCode rotDown sentDown
+    global rrPendingMods rrSentDown hotkeyCombo rrLastFocus broadcastMap rotateCode rotDown sentDown excludedKeyCode
     set rrTaskId [after $settings(rrInterval) RRCheck]
     #Debug "RR Check..."
     set n [FocusIn]
@@ -4993,6 +4998,10 @@ proc RRCheck {} {
     set mods {}
     set keys {}
     foreach code $newDown {
+        if {[info exists excludedKeyCode($code)] && !($rotating && ![IsModifierKey $code])} {
+            Debug "Key $code is in the keys not broadcast"
+            continue
+        }
         if {[IsModifierKey $code]} {
             if {$code != $rotateCode} {
                 lappend mods $code

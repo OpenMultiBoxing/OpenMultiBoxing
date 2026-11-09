@@ -37,7 +37,8 @@ set rrExcludes [list [expr {$RSHIFT}] [expr {$RCTRL}]]
 RotateModifierUpdate
 Check "rotate modifier" [list $rotateCode $rotateText] [list [expr {$RSHIFT}] "Right Shift"]
 set rrLastFocus 1
-ResetIgnoredKeys {}
+# A is in the "all but these keys" list
+ResetIgnoredKeys {65}
 set rrLastCode [GetKeyboardState]
 
 proc Step {} {RRCheck; global rrTaskId; after cancel $rrTaskId}
@@ -76,6 +77,16 @@ Check "still nothing broadcast" $broadcast {}
 Check "normal broadcast without modifier" [Press 0x39] {}
 Check "broadcast" $broadcast {{57 0} {57 1}}
 set broadcast {}
+# keys not broadcast (A) still rotate
+Check "A not broadcast" [list [Press 65] $broadcast] {{} {}}
+set held([expr {$RSHIFT}]) 1
+Step
+Check "A rotates: focused window" [Press 65] {}
+Check "A rotates: next" [Press 65] {{2 65 0} {2 65 1}}
+Check "A: nothing broadcast" $broadcast {}
+unset held([expr {$RSHIFT}])
+Step
+Check "A not broadcast after" [list [Press 65] $broadcast] {{} {}}
 
 # swap: starts again at the focused window
 set held([expr {$RSHIFT}]) 1
