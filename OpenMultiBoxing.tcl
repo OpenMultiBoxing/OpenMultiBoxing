@@ -1677,7 +1677,7 @@ proc UISetup {} {
         bind .rotb <KeyPress> {if {[RotateCaptureKey %k 0]} break}
         bind .rotb <KeyRelease> {if {[RotateCaptureKey %k 1]} break}
         bind .rotb <FocusOut> RotateCaptureEnd
-        tooltip .rotb "While $rrlabel is on, hold this key and press a key several times (e.g. to take turns with a stun):\neach press goes to the current window (with this key held) and, from the second press on,\nalso to one other window, taking turns. Swapping windows starts again.\nClick then press Shift, Ctrl or Alt to change it, right click to remove it."
+        tooltip .rotb "While $rrlabel is on, hold this key and press a key several times (e.g. to take turns with a stun):\neach press goes to the current window (with this key held) and, from the second press on,\nalso to one other window, taking turns (the current window's own turn: just it).\nSwapping windows starts again.\nClick then press Shift, Ctrl or Alt to change it, right click to remove it."
         RotateModifierUpdate
 
         grid [ttk::label .lBMap -text "Key remapping (: separated list)"] -padx 4 -columnspan 2 -sticky w
