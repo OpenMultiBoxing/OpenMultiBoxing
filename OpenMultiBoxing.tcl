@@ -5465,8 +5465,14 @@ proc RotateBarUpdate {} {
     tooltip $t.cfg "Set the keys (Rotate in the Hotkeys window)"
     RotateBarRefresh
     if {[wm state $t] eq "withdrawn"} {
-        wm deiconify $t
+        ShowNoActivate $t
     }
+}
+
+# Shows toplevel t without activating it (wm deiconify makes even a WS_EX_NOACTIVATE window the active one)
+proc ShowNoActivate {t} {
+    # SW_SHOWNA
+    twapi::show_window [list [expr {[wm frame $t]}] HWND]
 }
 
 # Only shows/hides the bar (virtual desktop changes: no rebuild, no re-show, the switch reports several changes)
@@ -5480,7 +5486,7 @@ proc RotateBarShow {} {
     set want [expr {[info exists settings(rotateBarShown)] && $settings(rotateBarShown) && ![RotateBarAway]}]
     set shown [expr {[wm state $t] ne "withdrawn"}]
     if {$want && !$shown} {
-        wm deiconify $t
+        ShowNoActivate $t
     } elseif {!$want && $shown} {
         RotateAnyLeave
         wm withdraw $t
