@@ -4964,7 +4964,6 @@ proc FocusIn {} {
 proc RRCheck {} {
     global rrCodes rrExcludes rrLastCode rrTaskId settings maxNumW slot2position
     global rrPendingMods rrSentDown hotkeyCombo rrLastFocus broadcastMap rotateCode rotDown sentDown excludedKeyCode
-    global rotHover
     set rrTaskId [after $settings(rrInterval) RRCheck]
     #Debug "RR Check..."
     set n [FocusIn]
@@ -5000,9 +4999,7 @@ proc RRCheck {} {
         }
     }
     # the rotate modifier pauses broadcasting too, keys pressed then go to one window
-    # (or with the mouse over the Rotate bar's "Any key" area)
-    set rotating [expr {($rotateCode ne "" && ([twapi::GetAsyncKeyState $rotateCode] & 0x8000))
-        || ([info exists rotHover] && $rotHover)}]
+    set rotating [expr {$rotateCode ne "" && ([twapi::GetAsyncKeyState $rotateCode] & 0x8000)}]
     foreach code $newUp {
         unset -nocomplain rrPendingMods($code)
         if {[info exists rotDown($code)]} {
@@ -5416,9 +5413,9 @@ proc RotateBarToggle {} {
 
 # Shows/hides the bar and (re)makes its buttons
 proc RotateBarUpdate {} {
-    global settings rotHover
+    global settings
     set t .rotbar
-    set rotHover 0
+    RotateAnyLeave
     # (tool windows show on every virtual desktop: follows the main game window's, else ours)
     if {![info exists settings(rotateBarShown)] || !$settings(rotateBarShown) || [RotateBarAway]} {
         if {[winfo exists $t]} {
@@ -5443,9 +5440,11 @@ proc RotateBarUpdate {} {
     }
     set a [ttk::label $t.any -text "⟳ Any key" -padding {6 0}]
     pack $a -side left -fill y -padx 2 -pady 2
-    bind $a <Enter> {RotateHover 1}
-    bind $a <Leave> {RotateHover 0}
-    tooltip $a "While the mouse is here (with broadcasting on), each key pressed\nin the game goes to the current window and, from the second press on,\nalso to one other window, taking turns, like with the Rotate Modifier held"
+    bind $a <Enter> {if {"%m" eq "NotifyNormal"} RotateAnyEnter}
+    bind $a <Leave> {if {"%m" eq "NotifyNormal"} RotateAnyLeave}
+    bind $a <KeyPress> {RotateAnyKey %k 0; break}
+    bind $a <KeyRelease> {RotateAnyKey %k 1; break}
+    tooltip $a "While the mouse is here, each key you press (with Shift/Ctrl/Alt held)\ngoes to one game window only, taking turns (each key has its own turns)"
     set any 0
     for {set n 1} {$n <= [RotateCount]} {incr n} {
         if {[RotateKeyCode $settings(rotateKey$n)] eq ""} {
@@ -5478,13 +5477,92 @@ proc RotateBarAway {} {
     OnOtherDesktopN main
 }
 
-# Mouse over the bar's "Any key" area: keys pressed rotate (see RRCheck)
-proc RotateHover {on} {
-    global rotHover settings
-    set rotHover $on
-    if {[winfo exists .rotbar.any]} {
-        .rotbar.any configure -foreground [expr {$on ? $settings(overlayFocusColor) : ""}]
+# Mouse over the bar's "Any key" area: the bar takes the keyboard (so no game window gets the keys), each
+# key with the modifiers held goes to one window, taking turns per key; the previous foreground window
+# (rotAnyPrev) gets it back when the mouse leaves
+proc RotateAnyEnter {} {
+    global rotAnyPrev settings
+    set t .rotbar
+    if {[info exists rotAnyPrev] || ![winfo exists $t.any]} {
+        return
     }
+    if {[catch {twapi::get_foreground_window} fg]} {
+        set fg ""
+    }
+    set rotAnyPrev $fg
+    # (activating: not with WS_EX_NOACTIVATE)
+    set wh [list [expr {[wm frame $t]}] HWND]
+    lassign [twapi::get_window_style $wh] style exstyle
+    twapi::set_window_style $wh $style [expr {$exstyle & ~0x08000000}]
+    if {[catch {Foreground $wh} err]} {
+        Debug "Rotate any key: couldn't activate the bar: $err"
+    }
+    focus -force $t.any
+    $t.any configure -foreground $settings(overlayFocusColor)
+    Debug "Rotate any key: on (was $fg)"
+}
+
+proc RotateAnyLeave {} {
+    global rotAnyPrev rotAnyDown
+    if {![info exists rotAnyPrev]} {
+        return
+    }
+    foreach vk [array names rotAnyDown] {
+        RotateAnyKey $vk 1
+    }
+    set t .rotbar
+    if {[winfo exists $t.any]} {
+        NoActivate $t
+        $t.any configure -foreground ""
+    }
+    Debug "Rotate any key: off, back to $rotAnyPrev"
+    if {$rotAnyPrev ne ""} {
+        catch {Foreground $rotAnyPrev}
+    }
+    unset rotAnyPrev
+}
+
+# Key vk (Tk's %k: the Windows key code) down/up in the Any key area. Shift/Ctrl/Alt alone aren't sent,
+# the ones held go down before the key and up after it, in that key's window.
+proc RotateAnyKey {vk up} {
+    global rotAnyDown
+    set vk [expr {$vk}]
+    if {$vk in {16 17 18 91 92} || ($vk >= 0xA0 && $vk <= 0xA5)} {
+        return
+    }
+    if {$up} {
+        if {[info exists rotAnyDown($vk)]} {
+            lassign $rotAnyDown($vk) t mods
+            unset rotAnyDown($vk)
+            RotateUp $t $vk
+            foreach m [lreverse $mods] {
+                RotateUp $t $m
+            }
+        }
+        return
+    }
+    if {[info exists rotAnyDown($vk)]} {
+        # held: Windows repeats the key down
+        return
+    }
+    set t [RotateTarget $vk]
+    if {$t eq ""} {
+        return
+    }
+    set mods {}
+    # L/R Shift, Ctrl, Alt
+    foreach m {160 161 162 163 164 165} {
+        if {[twapi::GetAsyncKeyState $m] & 0x8000} {
+            lappend mods $m
+        }
+    }
+    Debug "Rotate any key: $vk (with $mods) to $t"
+    foreach m $mods {
+        PostKeyToSlot $t $m 0
+    }
+    PostKeyToSlot $t $vk 0
+    set rotAnyDown($vk) [list $t $mods]
+    RotateBarRefresh
 }
 
 # Turns of bar key n start again from the current window

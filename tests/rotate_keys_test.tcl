@@ -188,17 +188,34 @@ RotateBarRelease 1
 Check "wraps to 1" $posted {{1 57 0} {1 57 1}}
 Check "key names" [list [RotateKeyCode 9] [RotateKeyCode f1] [RotateKeyCode NUMPAD1] [RotateKeyCode bogus]] {57 112 97 {}}
 
-# Mouse over the bar's "Any key" area: keys rotate like with the modifier held
-set settings(broadcastDelay) 0
+# The bar's "Any key" area (it has the keyboard): each key with the modifiers held goes to one window,
+# taking turns per key, held as long as the key, no delay
+set settings(broadcastDelay) 100
 unset held([expr {$RSHIFT}])
 Step
 array set rotNext {}
-set broadcast {}
-set rotHover 1
-Check "hover: current window got it" [Press 0x39] {}
-Check "hover: next" [Press 0x39] {{3 57 0} {3 57 1}}
-Check "hover: not broadcast" $broadcast {}
-set rotHover 0
-Check "no hover: broadcast" [list [Press 0x39] $broadcast] {{} {{57 0} {57 1}}}
+set posted {}
+RotateAnyKey 57 0
+RotateAnyKey 57 0
+Check "any key: current window, repeat ignored" $posted {{2 57 0}}
+RotateAnyKey 57 1
+Check "any key: up" $posted {{2 57 0} {2 57 1}}
+set posted {}
+set held(160) 1
+RotateAnyKey 160 0
+Check "any key: shift alone not sent" $posted {}
+RotateAnyKey 57 0
+RotateAnyKey 57 1
+RotateAnyKey 160 1
+unset held(160)
+Check "any key: shift-9 to the next window" $posted {{3 160 0} {3 57 0} {3 57 1} {3 160 1}}
+set posted {}
+RotateAnyKey 65 0
+Check "any key: other key, own turns" $posted {{2 65 0}}
+set rotAnyPrev ""
+proc Foreground {w} {}
+RotateAnyLeave
+Check "leaving releases" $posted {{2 65 0} {2 65 1}}
+Check "nothing broadcast" $broadcast {}
 RotateBarReset 1
 Check "bar right click resets" [array get rotNext 57] {}
