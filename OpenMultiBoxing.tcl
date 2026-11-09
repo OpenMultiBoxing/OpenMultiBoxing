@@ -4980,7 +4980,7 @@ proc RRCheck {} {
             unset rotDown($code)
             if {[info exists sentDown($i,$rcode)]} {
                 Debug "Rotated key $code now reset, sending up event to $i"
-                PostKeyToSlot $i $rcode 1
+                QueueKeyToSlot $i $rcode 1 0
             }
         }
         if {![info exists rrSentDown($code)]} {
@@ -5115,7 +5115,7 @@ proc HeldModifiersMask {} {
 
 # Key code pressed in focused window n with the rotate modifier held: post it to that key's next window
 proc RotateKey {n code} {
-    global slot2handle rotNext rotDown broadcastMap
+    global slot2handle rotNext rotDown broadcastMap settings bcPending sentDown
     set skip [RRExcludedWindows]
     set slots {}
     foreach i [lsort -integer [array names slot2handle]] {
@@ -5141,7 +5141,11 @@ proc RotateKey {n code} {
         set rcode $broadcastMap($code)
     }
     Debug "Rotated key $code: sending $rcode down to $target"
-    PostKeyToSlot $target $rcode 0
+    # with the broadcast delay, like broadcast keys: the focused window does it too
+    if {$settings(broadcastDelay) > 0 && [array size bcPending] == 0 && [array size sentDown] == 0} {
+        RollBroadcastLags [list $target]
+    }
+    QueueKeyToSlot $target $rcode 0 0
     set rotDown($code) [list $target $rcode]
 }
 
