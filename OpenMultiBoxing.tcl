@@ -1668,6 +1668,17 @@ proc UISetup {} {
         grid [entry .eRR2 -textvariable settings(rrModExcludeList) -width $width] -columnspan 2 -padx 4 -sticky ew
         tooltip .eRR2 "Which modifiers pause $rrlabel while held\nHit <Return> after change to take effect.\nSee help/FAQ for list."
         bind .eRR2 <Return> RRKeysListChange
+        frame .rot
+        pack [ttk::label .rot.l -text "Rotate Modifier:"] -side left
+        ttk::button .rotb -textvariable rotateText -command RotateCaptureStart
+        pack .rotb -in .rot -side left -fill x -expand 1 -padx {4 0}
+        grid .rot -padx 4 -columnspan 2 -sticky ew
+        bind .rotb <Button-3> RotateClear
+        bind .rotb <KeyPress> {if {[RotateCaptureKey %k 0]} break}
+        bind .rotb <KeyRelease> {if {[RotateCaptureKey %k 1]} break}
+        bind .rotb <FocusOut> RotateCaptureEnd
+        tooltip .rotb "While $rrlabel is on, hold this key and press a key several times:\nthe first press goes to the current window only, each next press to the next window only\n(e.g. to take turns with a stun). Swapping windows starts again from the current one.\nClick then press Shift, Ctrl or Alt to change it, right click to remove it."
+        RotateModifierUpdate
 
         grid [ttk::label .lBMap -text "Key remapping (: separated list)"] -padx 4 -columnspan 2 -sticky w
         grid [entry .eBMap -textvariable settings(broadcastMap) -width $width] -columnspan 2 -padx 4 -sticky ew
@@ -3470,6 +3481,7 @@ proc windowIndicatorN {n args} {
 proc SetAsMain {n} {
     global settings lastFocusWindow swappedWindow
     windowIndicatorN $lastFocusWindow configure -foreground white
+    RotationsReset
     SetAsMainInt $n
     MirrorPickSwapped
     set swappedWindow $n
@@ -4619,7 +4631,7 @@ proc RollBroadcastLags {slots} {
 # Send key up for all the keys we posted down and not up yet
 # (before hotkeys change focus and when broadcasting is turned off/paused)
 proc ReleaseBroadcastKeys {} {
-    global sentDown slot2handle rrSentDown bcPending bcLastT
+    global sentDown slot2handle rrSentDown bcPending bcLastT rotDown
     # Drop delayed downs, send delayed ups now (sentDown no longer has them)
     foreach k [lsort -dictionary [array names bcPending]] {
         lassign $bcPending($k) id keyCode up
@@ -4640,6 +4652,7 @@ proc ReleaseBroadcastKeys {} {
         }
     }
     array unset sentDown *
+    array unset rotDown *
     foreach code [array names rrSentDown] {
         SendToClients "UP $code\n"
     }
@@ -4809,6 +4822,12 @@ array set rrSentDown {}
 array set rrPendingMods {}
 # Slot of the game window that had focus at the last broadcast check
 set rrLastFocus 0
+# Rotation (keys pressed with settings(rotateModifier) held go to one window per press):
+# rotateCode its key code (empty when off), rotNext(keyCode) OMB number of the next window for that key
+# (none: the focused one), rotDown(keyCode) {slot sentCode} posted down without the up yet
+set rotateCode {}
+array set rotNext {}
+array set rotDown {}
 
 proc RRKeysListChange {} {
     twapi::_init_vk_map
@@ -4840,6 +4859,7 @@ proc RRKeysListChange {} {
     lassign [RRkeyListToCodes $settings(rrKeyListExclude)] rrCodes settings(rrKeyListExclude)
     lassign [RRkeyListToCodes $settings(rrModExcludeList)] rrExcludes settings(rrModExcludeList)
     ResetIgnoredKeys $rrCodes
+    RotateModifierUpdate
 }
 
 set rrLastCode {}
@@ -4911,7 +4931,7 @@ proc FocusIn {} {
 # Main broadcast setup
 proc RRCheck {} {
     global rrCodes rrExcludes rrLastCode rrTaskId settings maxNumW slot2position
-    global rrPendingMods rrSentDown hotkeyCombo rrLastFocus broadcastMap
+    global rrPendingMods rrSentDown hotkeyCombo rrLastFocus broadcastMap rotateCode rotDown sentDown
     set rrTaskId [after $settings(rrInterval) RRCheck]
     #Debug "RR Check..."
     set n [FocusIn]
@@ -4942,12 +4962,22 @@ proc RRCheck {} {
     # other windows otherwise), keys pressed then aren't broadcast
     set paused 0
     foreach code $rrExcludes {
-        if {[twapi::GetAsyncKeyState $code] != 0} {
+        if {$code != $rotateCode && [twapi::GetAsyncKeyState $code] != 0} {
             set paused 1
         }
     }
+    # the rotate modifier pauses broadcasting too, keys pressed then go to one window
+    set rotating [expr {$rotateCode ne "" && ([twapi::GetAsyncKeyState $rotateCode] & 0x8000)}]
     foreach code $newUp {
         unset -nocomplain rrPendingMods($code)
+        if {[info exists rotDown($code)]} {
+            lassign $rotDown($code) i rcode
+            unset rotDown($code)
+            if {[info exists sentDown($i,$rcode)]} {
+                Debug "Rotated key $code now reset, sending up event to $i"
+                PostKeyToSlot $i $rcode 1
+            }
+        }
         if {![info exists rrSentDown($code)]} {
             # deferred modifier, hotkey key, etc... that we never sent down
             Debug "Key $code now reset, wasn't broadcast"
@@ -4964,10 +4994,23 @@ proc RRCheck {} {
     set keys {}
     foreach code $newDown {
         if {[IsModifierKey $code]} {
-            lappend mods $code
+            if {$code != $rotateCode} {
+                lappend mods $code
+            }
         } else {
             lappend keys $code
         }
+    }
+    if {$rotating} {
+        foreach code $keys {
+            set mask [HeldModifiersMask]
+            if {[info exists hotkeyCombo($mask,$code)] || [IsSystemCombo $mask $code]} {
+                Debug "Key $code with modifiers $mask is a hotkey or Windows shortcut, not rotating"
+                continue
+            }
+            RotateKey $n $code
+        }
+        return
     }
     foreach code $mods {
         if {$settings(rrDeferModifiers)} {
@@ -5018,11 +5061,11 @@ proc IsModifierKey {code} {
 
 # Currently held modifiers that are broadcast (not ignored nor pausing broadcast like RCONTROL by default)
 proc HeldBroadcastModifiers {} {
-    global ignoredKeyCode rrExcludes
+    global ignoredKeyCode rrExcludes rotateCode
     set res {}
     foreach code {0xA0 0xA1 0xA2 0xA3 0xA4 0xA5 0x5B 0x5C} {
         set code [expr {$code}]
-        if {[info exists ignoredKeyCode($code)] || [lsearch -exact $rrExcludes $code] >= 0} {
+        if {[info exists ignoredKeyCode($code)] || [lsearch -exact $rrExcludes $code] >= 0 || $code == $rotateCode} {
             continue
         }
         if {[twapi::GetAsyncKeyState $code] & 0x8000} {
@@ -5055,6 +5098,150 @@ proc HeldModifiersMask {} {
         }
     }
     return $mask
+}
+
+# --- Rotation: with the rotate modifier (Right Shift by default) held, each press of a key goes to one
+# window: the focused one (it gets the key for real), then the next ones by OMB number (not skipped ones)
+
+# Key code pressed in focused window n with the rotate modifier held: post it to that key's next window
+proc RotateKey {n code} {
+    global slot2handle rotNext rotDown broadcastMap
+    set skip [RRExcludedWindows]
+    set slots {}
+    foreach i [lsort -integer [array names slot2handle]] {
+        if {$i ni $skip} {
+            lappend slots $i
+        }
+    }
+    if {[info exists rotNext($code)]} {
+        set target [RotationAt $slots $rotNext($code)]
+    } else {
+        set target $n
+    }
+    if {$target eq ""} {
+        return
+    }
+    set rotNext($code) [expr {$target + 1}]
+    if {$target == $n} {
+        Debug "Rotated key $code: focused window $n's turn, it got it"
+        return
+    }
+    set rcode $code
+    if {[info exists broadcastMap($code)]} {
+        set rcode $broadcastMap($code)
+    }
+    Debug "Rotated key $code: sending $rcode down to $target"
+    PostKeyToSlot $target $rcode 0
+    set rotDown($code) [list $target $rcode]
+}
+
+# First of the (sorted) slots >= i, else the first one
+proc RotationAt {slots i} {
+    foreach s $slots {
+        if {$s >= $i} {
+            return $s
+        }
+    }
+    lindex $slots 0
+}
+
+# Rotations start again at the focused window (after swaps)
+proc RotationsReset {} {
+    global rotNext
+    array unset rotNext *
+}
+
+# Rotate modifiers: setting name and as shown
+proc RotateModifiers {} {
+    return {LSHIFT "Left Shift" RSHIFT "Right Shift" LCONTROL "Left Ctrl" RCONTROL "Right Ctrl"
+        LALT "Left Alt" RALT "Right Alt"}
+}
+
+proc RotateModifierUpdate {} {
+    global settings rotateCode rotateText
+    twapi::_init_vk_map
+    set rotateModifiers [RotateModifiers]
+    set m [string toupper $settings(rotateModifier)]
+    set code {}
+    set rotateText "None"
+    if {[dict exists $rotateModifiers $m]} {
+        set code [expr [lindex $twapi::vk_map($m) 0]]
+        set rotateText [dict get $rotateModifiers $m]
+    }
+    set settings(rotateModifier) [expr {$code eq "" ? "" : $m}]
+    # (also called when broadcasting is turned on: keep the turns then)
+    if {$code ne $rotateCode} {
+        set rotateCode $code
+        RotationsReset
+    }
+}
+
+# Rotate button: click then press Shift, Ctrl or Alt (Esc cancels), right click clears
+set rotateCapture 0
+proc RotateCaptureStart {} {
+    global rotateCapture rotateText
+    if {$rotateCapture} {
+        RotateCaptureEnd
+        return
+    }
+    set rotateCapture 1
+    set rotateText "Press Shift, Ctrl or Alt"
+    focus .rotb
+}
+
+proc RotateCaptureEnd {} {
+    global rotateCapture rotatePressed
+    unset -nocomplain rotatePressed
+    if {$rotateCapture} {
+        set rotateCapture 0
+        RotateModifierUpdate
+    }
+}
+
+# Returns 1 when the key was for the capture
+proc RotateCaptureKey {vk up} {
+    global rotateCapture settings rotatePressed
+    if {!$rotateCapture} {
+        return 0
+    }
+    if {$vk == 0x1B} {
+        if {$up} {
+            RotateCaptureEnd
+        }
+        return 1
+    }
+    if {$vk ni {16 17 18 160 161 162 163 164 165}} {
+        return 1
+    }
+    if {!$up} {
+        # which one (left/right) of that key is down (Tk gives the generic Shift/Ctrl/Alt code)
+        set family [dict get {16 {160 161} 17 {162 163} 18 {164 165}} [expr {$vk < 160 ? $vk : 16 + ($vk - 160) / 2}]]
+        foreach {name label} [RotateModifiers] {
+            set code [expr [lindex $twapi::vk_map($name) 0]]
+            if {$code in $family && ([twapi::GetAsyncKeyState $code] & 0x8000)} {
+                set rotatePressed $name
+                break
+            }
+        }
+        return 1
+    }
+    # set on release (Alt released elsewhere would open the menu)
+    if {[info exists rotatePressed]} {
+        Debug "Rotate modifier set to $rotatePressed"
+        set settings(rotateModifier) $rotatePressed
+        unset rotatePressed
+        RotateCaptureEnd
+        SaveSettings
+    }
+    return 1
+}
+
+proc RotateClear {} {
+    global settings rotateCapture
+    set rotateCapture 0
+    set settings(rotateModifier) ""
+    RotateModifierUpdate
+    SaveSettings
 }
 
 # --- Skip windows: windows (OMB numbers, so it follows them when swapped) that don't get broadcast keys/clicks
@@ -7397,6 +7584,7 @@ array set settings {
     borderless 1
     rrKeyListExclude "W A S D"
     rrModExcludeList "RCONTROL RSHIFT RALT"
+    rotateModifier RSHIFT
     rrInterval 5
     rrAlwaysFocus 1
     autoResetFocusToMain 1
