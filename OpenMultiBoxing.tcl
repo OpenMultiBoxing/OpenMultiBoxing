@@ -1518,21 +1518,13 @@ proc RegisterAllHotkeys {} {
     }
 }
 
-# The user's focus follows mouse choice, also when broadcasting turned it off for now
-proc MouseFollowChoice {} {
-    global mouseFollow rrOn rrMouse isPaused prevRR prevRRMouse
-    expr {$mouseFollow || ([info exists rrMouse] && $rrMouse && [info exists rrOn] && $rrOn)
-          || ([info exists isPaused] && $isPaused && [info exists prevRR] && $prevRR
-              && [info exists prevRRMouse] && $prevRRMouse)}
-}
-
 proc RevertMouseFollow {} {
-    global settings mouseTouched
+    global settings mouseTouched mouseFollow
     if {![info exists mouseTouched]} {
         # exiting before the startup read Windows' setting (e.g. another copy running): never changed it
         return
     }
-    if {!$settings(mouseFocusOffAtExit) && [MouseFollowChoice]} {
+    if {!$settings(mouseFocusOffAtExit) && $mouseFollow} {
         Debug "Keeping mouse focus mode on on exit"
         ApplyMouseFollow 1
         return
@@ -1556,7 +1548,6 @@ proc exit {{status 0}} {
 
 proc FocusFollowMouseToggle {} {
     Debug "Follow mouse toggle requested"
-    .mf configure -state enabled
     .mf invoke
 }
 
@@ -2297,7 +2288,7 @@ set isPaused 0
 set pauseSchedule {}
 
 proc PeriodicChecks {} {
-    global settings isPaused prevRR prevOL prevRRMouse hasRR hasBR rrOn rrMouse mouseFollow\
+    global settings isPaused prevRR prevOL hasRR hasBR rrOn mouseFollow\
          maxNumW pauseSchedule lastFocusWindow slot2handle mouseBroadcast prevNP networkPause
     after cancel $pauseSchedule
     set pauseSchedule {}
@@ -2331,7 +2322,6 @@ proc PeriodicChecks {} {
         if {$shouldPause} {
             set prevRR 0
             set prevOL 0
-            set prevRRMouse 0
             set prevNP $networkPause
             if {!$networkPause} {
                 set networkPause 1
@@ -2339,10 +2329,6 @@ proc PeriodicChecks {} {
             # Windows' setting only: the checkbox keeps showing the user's choice
             if {$mouseFollow} {
                 ApplyMouseFollow 0
-            }
-            if {[info exists rrMouse] && $rrMouse} {
-                set prevRRMouse 1
-                set rrMouse 0
             }
             if {$hasRR && $rrOn} {
                 RRToggle
@@ -2354,13 +2340,10 @@ proc PeriodicChecks {} {
             }
             # can't seem to raise our own window...
         } else {
-            Debug "Restoring $prevRR $mouseFollow $prevOL $prevRRMouse $prevNP"
+            Debug "Restoring $prevRR $mouseFollow $prevOL $prevNP"
             set networkPause $prevNP
             if {$prevRR && !$rrOn} {
                 RRToggle
-            }
-            if {$prevRRMouse} {
-                set rrMouse 1
             }
             if {$mouseFollow} {
                 ApplyMouseFollow 1
@@ -4763,7 +4746,7 @@ proc RRreadAllKeys {} {
 }
 
 proc RRUpdate {} {
-    global rrOn rrOnLabel settings hasRR hasBR mouseFollow rrMouse rrLastCode rrTaskId mouseBroadcast rrPendingMods
+    global rrOn rrOnLabel settings hasRR hasBR rrLastCode rrTaskId rrPendingMods
     Debug "RRupdate $rrOn"
     ReleaseBroadcastKeys
     array unset rrPendingMods *
@@ -4776,20 +4759,9 @@ proc RRUpdate {} {
         set rrOnLabel [RRIndicatorLabel]
         RRKeysListChange
         RRreadAllKeys
-        set rrMouse $mouseFollow
-        if {$mouseFollow} {
-            set mouseFollow 0
-            UpdateMouseFollow
-            .mf configure -state disabled
-        }
         set rrTaskId [after $settings(rrInterval) RRCheck]
     } else {
         set rrOnLabel ""
-        .mf configure -state enabled
-        if {[info exists rrMouse] && $rrMouse && (!$mouseBroadcast || !$settings(mouseBroadcastUsePostMessage))} {
-            set mouseFollow 1
-            UpdateMouseFollow
-        }
     }
     AddMouseToRRLabel
     # read twice
@@ -6734,21 +6706,19 @@ proc InitMouseFollow {} {
     Debug "Focus follows mouse at start: $on $delay -> $mouseFollow, restores $mouseOrig"
 }
 
-# Checkbox/hotkey/broadcast changes of mouseFollow: while paused, Windows' setting stays as the user had it
-# until the mouse is back in a game window (PeriodicChecks then applies mouseFollow). Broadcasting with it on
-# turns it off.
+# Checkbox/hotkey changes of mouseFollow: while paused, Windows' setting stays as the user had it until the
+# mouse is back in a game window (PeriodicChecks then applies mouseFollow)
 proc UpdateMouseFollow {} {
-    global mouseFollow isPaused settings rrMouse rrOn hasRR
+    global mouseFollow isPaused settings
     set paused [expr {[info exists isPaused] && $isPaused && $settings(mouseOutsideWindowsPauses)}]
-    set broadcasting [expr {[info exists rrMouse] && $rrMouse && $rrOn && $hasRR}]
-    ApplyMouseFollow [expr {$mouseFollow && !$paused}] [expr {$broadcasting && !$paused}]
+    ApplyMouseFollow [expr {$mouseFollow && !$paused}]
 }
 
-# Sets Windows' focus follows mouse on with our delay, or back to the user's own setting (or off when
-# forceOff), unless we never turned it on
-proc ApplyMouseFollow {on {forceOff 0}} {
+# Sets Windows' focus follows mouse on with our delay, or back to the user's own setting, unless we never
+# turned it on
+proc ApplyMouseFollow {on} {
     global settings mouseOrig mouseTouched
-    Debug "ApplyMouseFollow $on $forceOff $settings(mouseDelay) $mouseTouched $mouseOrig"
+    Debug "ApplyMouseFollow $on $settings(mouseDelay) $mouseTouched $mouseOrig"
     if {$on} {
         set mouseTouched 1
         SetMouseDelay $settings(mouseDelay)
@@ -6756,10 +6726,6 @@ proc ApplyMouseFollow {on {forceOff 0}} {
         return
     }
     if {!$mouseTouched} {
-        return
-    }
-    if {$forceOff} {
-        SetFocusFollowMouse 0
         return
     }
     lassign $mouseOrig origOn origDelay

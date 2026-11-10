@@ -126,37 +126,37 @@ set mouseFollow 0
 RevertMouseFollow
 Check "off: user's at exit" [list $ffm $delays] {1 200}
 
-# exit while broadcasting (which turned it off for now): on again
+# broadcasting leaves it alone (the real RRUpdate), also paused and back in game
 set pauseNow 0
 PeriodicChecks
 set mouseFollow 1
 UpdateMouseFollow
+proc RRToggle {} {global rrOn; set rrOn [expr {!$rrOn}]; RRUpdate}
+proc ReleaseBroadcastKeys {} {}
+proc RRIndicatorLabel {} {return B}
+proc RRKeysListChange {} {}
+proc RRreadAllKeys {} {}
+proc GetKeyboardState {} {}
+proc PendHeldModifiers {} {}
+set settings(rrInterval) 100000
 set hasRR 1
-set rrOn 1
-set rrMouse 1
-set mouseFollow 0
 Reset
-UpdateMouseFollow
-Check "broadcasting: off" [list $ffm $delays] {0 {}}
-Reset
-RevertMouseFollow
-Check "broadcasting: on at exit" $ffm 1
-# turned off by the user after broadcasting was turned off
-set rrOn 0
-Reset
-RevertMouseFollow
-Check "not broadcasting: user's at exit" [list $ffm $delays] {1 200}
-# exit while paused, broadcasting paused too (RRToggle turns rrOn off)
-set rrOn 1
+RRToggle
+Check "broadcasting: untouched" [list $mouseFollow $ffm $delays] {1 {} {}}
 set pauseNow 1
 PeriodicChecks
-set rrOn 0
-Check "paused broadcasting: rrMouse saved" [list $rrMouse $prevRRMouse $prevRR] {0 1 1}
+Check "paused broadcasting: user's" [list $rrOn $mouseFollow $ffm $delays] {0 1 1 200}
+Reset
+set pauseNow 0
+PeriodicChecks
+Check "back in game: broadcasting and ours" [list $rrOn $mouseFollow $ffm $delays] {1 1 1 0}
 Reset
 RevertMouseFollow
-Check "paused broadcasting: on at exit" $ffm 1
+Check "broadcasting: kept on at exit" $ffm 1
+RRToggle
+Check "broadcasting off: untouched" $mouseFollow 1
 set hasRR 0
-set rrMouse 0
+set mouseFollow 0
 
 # started while kept on by a previous run (on with our delay): restoring turns it off
 set pauseNow 0
