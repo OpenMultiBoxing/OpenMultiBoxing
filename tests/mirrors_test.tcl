@@ -205,6 +205,7 @@ toplevel .layout
 canvas .layout.c
 set scale 0.25
 set settings(mirrorsShown) 1
+set settings(numWindows) 2
 LayoutShowMirrors
 Check "layout mirrors items" [llength [.layout.c find withtag mirrorShape]] 4
 Check "layout mirror scaled" [.layout.c coords [lindex [.layout.c find withtag mirrorShape] 0]] {0.0 0.0 2.5 2.5}

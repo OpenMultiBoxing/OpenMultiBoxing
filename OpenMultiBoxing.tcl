@@ -3947,13 +3947,15 @@ proc WindowLayout {} {
     ttk::checkbutton $tw.cb2 -variable settings(layoutOneRowCol) -text "One row/col for small windows" -command ChangeLayout
     ttk::checkbutton $tw.cb3 -variable settings(layoutStacked) -text "All Stacked" -command LayoutStackedChanged
     ttk::checkbutton $tw.cb4 -variable layoutMirrored -text "Mirrored" -command LayoutMirroredChanged
+    ttk::checkbutton $tw.cb5 -variable settings(layoutTwoBig) -text "2 big" -command ChangeLayout
+    tooltip $tw.cb5 "Two big windows side by side (e.g. tank and healer),\nthe others smaller below them.\nOn several monitors: the first 2 windows the same size"
     tooltip $tw.cb1 "Check or uncheck to redo the layout with\nwindows of the same size (fastest switch later)\nor not (1 big main window and smaller minions windows)"
     tooltip $tw.cb4 "All the game windows stacked under the main one,\nthe other positions show live mirrors of them:\nswaps are instant (no resizing). Click a mirror to make it main.\nFocus follows mouse only works for the main window."
     tooltip $tw.cb3 "All the windows at the same place, filling the biggest monitor:\nonly the one on top (main) is visible, swap to see another one\n(Mirrored also shows the others)"
     set layoutNumWindowsText "Layout for 99 windows"
     set width [expr {2+[string length $layoutNumWindowsText]}]
     UpdateLayoutNumWindows
-    grid x x x $tw.cb2 - $tw.cb4 -padx 8 -sticky we
+    grid x x $tw.cb5 $tw.cb2 - $tw.cb4 -padx 8 -sticky we
     grid $tw.cbA -column 0 -row 0 -sticky {}
     grid [ttk::label $tw.l1 -textvariable layoutNumWindowsText -width $width -anchor c -justify center] $tw.s - $tw.cb1  $tw.cbT $tw.cb3 -sticky we -padx 8
     tooltip $tw.l1 "After automatic layout,\ndrag any window to adjust as necessary,\nuse arrow keys for fine pixel adjustment.\nClick on text to toggle stay on top... etc..."
@@ -4329,10 +4331,16 @@ proc LayoutShowMirrors {} {
     if {!$settings(mirrorsShown)} {
         set fill ""
     }
-    set i 0
+    # not the mirrors of windows past the number of windows (0 is all, as in LoadLayout)
+    set n $settings(numWindows)
+    set i -1
     foreach m $settings(mirrors) {
+        incr i
         lassign [dict get $m geom] x y w h
         set src [dict get $m source]
+        if {$src ne "main" && $n > 0 && $src > $n} {
+            continue
+        }
         set label M$src
         if {$src eq "main"} {
             set label MM
@@ -4343,7 +4351,6 @@ proc LayoutShowMirrors {} {
         $c create text [expr {$x+$w/2.}] [expr {$y+$h/2.}] -text $label \
             -fill [expr {$fill eq "" ? $color : "white"}] -font TkSmallCaptionFont -state $state -tags $tags
         $c bind mirrorShape$i <Enter> [list LayoutMirrorInfo $i]
-        incr i
     }
     $c scale mirrorShape 0 0 $scale $scale
     $c raise mirrorShape
@@ -6084,6 +6091,8 @@ proc ChangeLayout {args} {
         return
     }
     if {!$settings(layoutAuto)} {
+        LayoutShowUpToN
+        after idle LayoutShowMirrors
         return
     }
     $c delete wowAll
@@ -6108,6 +6117,27 @@ proc ChangeLayout {args} {
     SetupMove
     after idle LayoutShowMirrors
     updateIndex
+}
+
+# Manual layout: only the windows up to the number of windows show, the others are hidden (back when it's
+# raised again, from the saved layout if they weren't in this one). 0 is all of them, as in LoadLayout
+proc LayoutShowUpToN {} {
+    global settings scale
+    set c .layout.c
+    set n $settings(numWindows)
+    foreach item [$c find withtag wowWindow] {
+        set tag [lsearch -inline -regexp [$c gettags $item] {^wow\d+$}]
+        regsub {^wow} $tag {} id
+        $c itemconfigure $tag -state [expr {$n == 0 || $id <= $n ? "normal" : "hidden"}]
+    }
+    for {set i 1} {$i<=$n} {incr i} {
+        if {[$c find withtag wow$i] eq "" && [info exists settings($i,posXY)]} {
+            lassign $settings($i,posXY) x1 y1
+            lassign $settings($i,size) w h
+            SetWindowOnCanvas $i $x1 $y1 [expr {$x1+$w}] [expr {$y1+$h}]
+            $c scale wow$i 0 0 $scale $scale
+        }
+    }
 }
 
 proc AutoLayout {n layoutOneSize} {
@@ -6155,9 +6185,26 @@ proc AutoLayout {n layoutOneSize} {
         # assign windows in proportion of monitor surface
         set mlist $monitorInfo(mlist)
         lassign [lindex $mlist 0] s sArea
-        if {!$layoutOneSize} {
+        if {!$layoutOneSize && !$settings(layoutTwoBig)} {
             LayoutOneMonitorVariable $s 1 1
             LayoutMonitors [lrange $mlist 1 end] [expr {$monitorInfo(totalArea)-$sArea}] 2 [expr {$n-1}]
+        } elseif {!$layoutOneSize && [llength $mlist] == 2} {
+            # 2 big: the second one the same size as the main one (smaller if it doesn't fit),
+            # the small ones around it
+            lassign [lindex $mlist 1] s2
+            lassign [CalcSize $s 1] w h
+            lassign [LayoutOneMonitorVariable $s2 2 [expr {$n-1}] [list $w $h]] w h
+            LayoutOneMonitorOneSize $s 1 1 $w $h 0 0
+        } elseif {!$layoutOneSize} {
+            # 2 big: alone on the 2 smallest monitors, same size, the small ones on the others
+            lassign [lindex $mlist 1] s2 s2Area
+            lassign [CalcSize $s 1] w h
+            lassign [CalcSize $s2 1] w2 h2
+            set w [expr {min($w, $w2)}]
+            set h [expr {min($h, $h2)}]
+            LayoutOneMonitorOneSize $s 1 1 $w $h 0 0
+            LayoutOneMonitorOneSize $s2 2 1 $w $h 0 0
+            LayoutMonitors [lrange $mlist 2 end] [expr {$monitorInfo(totalArea)-$sArea-$s2Area}] 3 [expr {$n-2}]
         } else {
             LayoutMonitors $mlist $monitorInfo(totalArea) 1 $n
         }
@@ -6288,8 +6335,44 @@ proc LayoutOneMonitorOneSize {monitor startAt numWindows ww wh maxW maxH} {
 }
 
 
-proc LayoutOneMonitorVariable  {monitor startAt numWindows} {
+# Big and small window sizes when a big window is c x c small ones, with 1 big window (inverted L of small
+# ones around it) or 2 side by side (small ones below), and the grid of small windows that fits on the monitor.
+# maxBig: {w h} the big window can't be bigger than
+proc VariableSizes {monitor c nBig {maxBig {}}} {
     global monitorInfo aspectRatio settings
+    set mw $monitorInfo($monitor,width)
+    set mh $monitorInfo($monitor,height)
+    set ar $aspectRatio
+    if {$nBig == 2} {
+        set bw [expr {$mw/2.}]
+        if {$ar == 0 && !$settings(layoutOneRowCol) && 0.75*$mw/$mh > 1} {
+            # Any: the shape of 2 big ones over 1 row of small ones (more rows for more windows,
+            # instead of squarer big windows). Else the Any 5:4 limit already does that
+            set ar [expr {0.75*$mw/$mh}]
+        }
+    } else {
+        set bw [expr {1.0*$mw*$c/($c+1)}]
+    }
+    set bh [expr {1.0*$mh*$c/($c+1)}]
+    # bh/bw will be int after aspect ratio and multiple of small pass
+    lassign [ConstrainWindow 0 0 $bw $bh $ar] v1 v2 bw bh
+    if {[llength $maxBig]} {
+        lassign $maxBig maxW maxH
+        set bw [expr {min($bw, $maxW)}]
+        set bh [expr {min($bh, $maxH)}]
+    }
+    # Make sure big size is divisable by sw exactly
+    set sw [expr {int($bw/$c)}]
+    set sh [expr {int($bh/$c)}]
+    set bw [expr {int($sw*$c)}]
+    set bh [expr {int($sh*$c)}]
+    return [list $bw $bh $sw $sh [expr {$mw/$sw}] [expr {$mh/$sh}]]
+}
+
+# maxBig: {w h} the big window can't be bigger than, for the second big window on its own monitor with 2 big:
+# then 1 big window even for 2 windows. Returns the big window size
+proc LayoutOneMonitorVariable  {monitor startAt numWindows {maxBig {}}} {
+    global monitorInfo settings
     # B window being a multiple of same size S window:
     #   BBBBS
     #   BBBBS
@@ -6298,49 +6381,149 @@ proc LayoutOneMonitorVariable  {monitor startAt numWindows} {
     #   SSSSC  ex is 8-9 boxing 1 big 4*2+1 small
     # Small ones making inverted L around big one
     # when small are 1/C size we can make up to  2*C+1 (corner)
-    # so for N windows
-    # C = (n-2)/2
+    # and more when the aspect ratio leaves columns (or rows) free: smallest C that fits them all.
     # n=3 is special with
     # BB
     # BB
     # SS
-    if {$numWindows<=2} {
-        LayoutOneMonitorOneSize $monitor $startAt $numWindows 0 0 0 0
-        return
+    # With 2 big windows: side by side, the small ones in rows below (and in the free columns)
+    #   BBBBBB
+    #   BBBBBB
+    #   SSSSSS
+    set fixed [llength $maxBig]
+    if {$numWindows<=2 && !$fixed} {
+        return [LayoutOneMonitorOneSize $monitor $startAt $numWindows 0 0 0 0]
     }
-    set c [expr {ceil(1.0*($numWindows-2)/2)}]
-    if {$c<2} {
-        set c 2
+    set nBig [expr {$settings(layoutTwoBig) && !$fixed ? 2 : 1}]
+    set oneRow [expr {$settings(layoutOneRowCol) && !$fixed}]
+    if {$oneRow && $nBig == 1} {
+        return [LayoutOneRowCol $monitor $startAt $numWindows]
     }
-    Debug "Will cut in $c to fit $numWindows"
+    set k [expr {$numWindows-$nBig}]
+    if {$oneRow} {
+        # 2 big ones and one row for all the small ones (c can be a half)
+        set c [expr {max(1.5, $k/2.)}]
+        lassign [VariableSizes $monitor $c $nBig] bw bh sw sh cols rows
+    } else {
+        for {set c 2} {1} {incr c} {
+            lassign [VariableSizes $monitor $c $nBig $maxBig] bw bh sw sh cols rows
+            if {$cols*$rows-$nBig*$c*$c >= $k} {
+                break
+            }
+        }
+    }
+    Debug "Will cut in $c to fit $numWindows: $nBig big $bw x $bh, small $sw x $sh, grid $cols x $rows"
+    # small windows, in order: {column below row}, row is the row next to the big ones (below = 0)
+    # or the row below them (below = 1)
+    set top $settings(layoutTop)
+    set cells {}
+    if {$nBig == 1} {
+        set column {}
+        for {set j 0} {$j<$c} {incr j} {
+            lappend column [list $c 0 $j]
+        }
+        set row {}
+        for {set i 0} {$i<=$c} {incr i} {
+            lappend row [list $i 1 0]
+        }
+        if {$top} {
+            # row (above the big one) first, but filling the column
+            set cells [concat [lrange $row 0 [expr {$k-$c-1}]] $column [lrange $row [expr {$k-$c}] end]]
+        } else {
+            set cells [concat $column $row]
+        }
+        # columns the aspect ratio left free, top to bottom
+        for {set i [expr {$c+1}]} {$i<$cols} {incr i} {
+            if {$top} {
+                lappend cells [list $i 1 0]
+            }
+            for {set j 0} {$j<$c} {incr j} {
+                lappend cells [list $i 0 $j]
+            }
+            if {!$top} {
+                lappend cells [list $i 1 0]
+            }
+        }
+    } else {
+        for {set i 0} {$i<$cols} {incr i} {
+            lappend cells [list $i 1 0]
+        }
+        if {!$oneRow} {
+            for {set i [expr {2*$c}]} {$i<$cols} {incr i} {
+                for {set j 0} {$j<$c} {incr j} {
+                    lappend cells [list $i 0 $j]
+                }
+            }
+        }
+    }
+    # rows the aspect ratio left free
+    if {!$oneRow} {
+        for {set j 1} {$j<$rows-$c} {incr j} {
+            for {set i 0} {$i<$cols} {incr i} {
+                lappend cells [list $i 1 $j]
+            }
+        }
+    }
+    set cells [lrange $cells 0 [expr {$k-1}]]
+    # main at bottom: the rows below go above, in reverse order
+    set rowsAbove 0
+    if {$top} {
+        set rowsAbove 1
+        foreach cell $cells {
+            lassign $cell i below j
+            if {$below && $j >= $rowsAbove} {
+                set rowsAbove [expr {$j+1}]
+            }
+        }
+    }
+    set x1 $monitorInfo($monitor,x1)
+    set y1 $monitorInfo($monitor,y1)
+    set by [expr {$y1+$rowsAbove*$sh}]
+    for {set b 0} {$b<$nBig} {incr b} {
+        set bx [expr {$x1+$b*$bw}]
+        SetWindowOnCanvas $startAt $bx $by [expr {$bx+$bw}] [expr {$by+$bh}]
+        incr startAt
+    }
+    foreach cell $cells {
+        lassign $cell i below j
+        set xw1 [expr {$x1+$i*$sw}]
+        if {!$below} {
+            set yw1 [expr {$by+$j*$sh}]
+        } elseif {$top} {
+            set yw1 [expr {$y1+($rowsAbove-1-$j)*$sh}]
+        } else {
+            set yw1 [expr {$by+$bh+$j*$sh}]
+        }
+        SetWindowOnCanvas $startAt $xw1 $yw1 [expr {$xw1+$sw}] [expr {$yw1+$sh}]
+        incr startAt
+    }
+    return [list $bw $bh]
+}
+
+# One big window and one row (or column) for all the small ones
+#    BBB
+#    BBB
+#    BBB
+#    sss
+proc LayoutOneRowCol {monitor startAt numWindows} {
+    global monitorInfo aspectRatio settings
+    set c [expr {$numWindows-1}]
     set x1 $monitorInfo($monitor,x1)
     set y1 $monitorInfo($monitor,y1)
     set x2 $monitorInfo($monitor,x2)
-    set y2 $monitorInfo($monitor,y2)
     set mw $monitorInfo($monitor,width)
     set mh $monitorInfo($monitor,height)
-    if {$settings(layoutOneRowCol)} {
-        # another special case for 3, 4 and 5 and more
-        #    BBB
-        #    BBB
-        #    BBB
-        #    sss
-        set c [expr {$numWindows-1}]
-        # if aspect ratio is ok to be wider or equal to screen's
-        if {$aspectRatio==0 || $aspectRatio>=1.0*$mw/$mh} {
-            # very wide, row below
-            set bw $mw
-            set bh [expr {1.0*$mh*$c/($c+1)}]
-            Debug "Wide ar $aspectRatio vs screen [expr 1.0*$mw/$mh]: using full width,c $c height $bh"
-        } else {
-            # aspect ratio is set, row to the side
-            set bh $mh
-            set bw [expr {1.0*$mw*$c/($c+1)}]
-            Debug "Not ultra wide: Using full height,c $c width $bw"
-        }
-    } else {
-        set bw [expr {1.0*$mw*$c/($c+1)}]
+    # if aspect ratio is ok to be wider or equal to screen's
+    if {$aspectRatio==0 || $aspectRatio>=1.0*$mw/$mh} {
+        # very wide, row below
+        set bw $mw
         set bh [expr {1.0*$mh*$c/($c+1)}]
+        Debug "Wide ar $aspectRatio vs screen [expr 1.0*$mw/$mh]: using full width,c $c height $bh"
+    } else {
+        # aspect ratio is set, row to the side
+        set bh $mh
+        set bw [expr {1.0*$mw*$c/($c+1)}]
+        Debug "Not ultra wide: Using full height,c $c width $bw"
     }
     # bh/bw will be int after aspect ratio and multiple of small pass
     Debug "monitor $mw x $mh -> $bw x $bh"
@@ -6359,15 +6542,6 @@ proc LayoutOneMonitorVariable  {monitor startAt numWindows} {
     SetWindowOnCanvas $startAt $x1 $yy1 $xw1 [expr {$yy1+$bh}]
     incr numWindows -1
     incr startAt 1
-    set savedStart $startAt
-    set lastWin [expr ($startAt+$numWindows)]
-    if {$settings(layoutTop) && !$settings(layoutOneRowCol) && $numWindows>$c} {
-        set startAt [expr round($startAt+$c+$numWindows%2)]
-        if {$startAt+$c>$lastWin} {
-            set startAt [expr round($lastWin-$c)]
-        }
-        Debug "C is $c : changed startAt to $startAt, last win $lastWin"
-    }
     set xw2 [expr {$xw1+$sw}]
     for {set i 0} {$xw2<=$x2 && $i<$c} {incr i 1} {
         set yw1 [expr {$yy1+$i*$sh}]
@@ -6378,10 +6552,6 @@ proc LayoutOneMonitorVariable  {monitor startAt numWindows} {
     }
     if {$settings(layoutTop)} {
         set yw1 $y1
-        if {!$settings(layoutOneRowCol)} {
-            set startAt $savedStart
-            Debug "Restore startAt to $savedStart"
-        }
     } else {
         set yw1 [expr {$y1+$bh}]
     }
@@ -7954,6 +8124,7 @@ array set settings {
     avoidTaskbar 1
     layoutOneSize 0
     layoutOneRowCol 0
+    layoutTwoBig 0
     layoutStacked 0
     layoutMirrored 0
     layoutScale "1/6"
