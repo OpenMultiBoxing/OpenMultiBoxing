@@ -58,7 +58,7 @@ Check "default still kept" [dict get [ReadSettings $SETTINGS_FILE] numWindows] 2
 
 # restart: the last profile is loaded, then Default has its own settings
 array unset settings
-array set settings {mirrors {} layoutMirrored 0}
+array set settings {mirrors {} layoutMirrored 0 layoutFixedSpots 0}
 LoadSettings
 Check "restart in last profile" $settings(profile) Raid
 Check "restart profile settings" $settings(numWindows) 5
