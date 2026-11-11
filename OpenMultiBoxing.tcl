@@ -1281,12 +1281,13 @@ proc ProtectedFolderError {title what path err consequence} {
 }
 
 proc LoadProfile {} {
-    global settings layoutMirrored
+    global settings layoutMirrored layoutFixedSpots
     set profile $settings(profile)
     set pf [ProfileFileName $profile]
-    # profiles saved before mirrors existed don't have them: none rather than the previous profile's
-    set prev [list mirrors $settings(mirrors) layoutMirrored $settings(layoutMirrored)]
-    array set settings {mirrors {} layoutMirrored 0}
+    # profiles saved before mirrors / fixed spots existed don't have them: none rather than the previous profile's
+    set prev [list mirrors $settings(mirrors) layoutMirrored $settings(layoutMirrored) \
+        layoutFixedSpots $settings(layoutFixedSpots)]
+    array set settings {mirrors {} layoutMirrored 0 layoutFixedSpots 0}
     if {[catch {source -encoding utf-8 $pf} err]} {
         array set settings $prev
         puts stderr "Error sourcing profile $pf\n$err"
@@ -1297,8 +1298,9 @@ proc LoadProfile {} {
     }
     # Otherwise can be reset when switching from Profile N back to Default
     set settings(profile) $profile
-    # the Window Layout checkbox, applied by its Save and Apply
+    # the Window Layout checkboxes, applied by its Save and Apply
     set layoutMirrored $settings(layoutMirrored)
+    set layoutFixedSpots $settings(layoutFixedSpots)
     AfterSettings
     # before ResetAll: the previous profile's mirrors don't match the new settings(mirrors)
     # at startup that's done once the main window is shown (creating the mirrors would create it
@@ -1554,21 +1556,22 @@ proc FocusFollowMouseToggle {} {
 proc updateIndex {args} {
     global nextWindow maxNumW pos windowSize stayOnTop settings slot2handle sot
     Debug "nextWindow is $nextWindow - args $args"
+    # its own layout area (n+1 with fixed spots)
+    set a [WindowArea $nextWindow]
     # Window Layout open: its draft (not saved yet) for that window, see LayoutToMain/MainToLayout
-    if {[winfo exists .layout.c] && [string is integer -strict $nextWindow] \
-            && [set draft [SizeOfWindow wow$nextWindow]] ne ""} {
+    if {[winfo exists .layout.c] && $a ne "" && [set draft [SizeOfWindow wow$a]] ne ""} {
         lassign $draft x y w h
         set windowSize "$w $h"
         set pos "$x $y"
-        if {[info exists sot($nextWindow)]} {
-            set stayOnTop $sot($nextWindow)
+        if {[info exists sot($a)]} {
+            set stayOnTop $sot($a)
         }
-        UpdateLayoutInfo wow$nextWindow
-    } elseif {[info exists settings($nextWindow,size)]} {
-        set windowSize $settings($nextWindow,size)
-        set pos $settings($nextWindow,posXY)
-        if {[info exists settings($nextWindow,stayOnTop)]} {
-            set stayOnTop $settings($nextWindow,stayOnTop)
+        UpdateLayoutInfo wow$a
+    } elseif {$a ne "" && [info exists settings($a,size)]} {
+        set windowSize $settings($a,size)
+        set pos $settings($a,posXY)
+        if {[info exists settings($a,stayOnTop)]} {
+            set stayOnTop $settings($a,stayOnTop)
         }
     }
     .csop configure -text "Wow window $nextWindow always on top"
@@ -1623,7 +1626,7 @@ proc UISetup {} {
         wm iconphoto . -default $imgOMB70
     }
     set labelW 18
-    grid [ttk::button .bH -text "Help" -width $labelW -command Help]  -row 1 -column 1 -padx 4
+    grid [ttk::button .bH -text "Help" -width $labelW -command Help]  -row 1 -column 1
     tooltip .bH "Opens online help page"
     grid [ttk::button .bwl -text "Window Layout" -width $labelW -command WindowLayout] -row 2 -column 1
     tooltip .bwl "View or change the Window Layout"
@@ -3366,10 +3369,11 @@ proc FocusNinternal {n fg} {
 
 # Focus whichever window is in location/spot 1
 proc FocusMain {} {
-    global slot2position
+    global slot2handle
     # either 1 or the window currently swapped to 1
-    if {[info exists slot2position(1)]} {
-        FocusN $slot2position(1) true
+    set n [SlotAtPosition 1]
+    if {$n ne "" && [info exists slot2handle($n)]} {
+        FocusN $n true
     }
 }
 
@@ -3441,14 +3445,18 @@ proc UpdateN {n} {
         Debug "Can't update non existent window $n"
         return
     }
-    if {![info exists settings($n,posXY)]} {
-        Debug "Can't update window $n without settings"
-        return
+    if {![info exists slot2position($n)]} {
+        set slot2position($n) [HomePosition $n]
     }
     # local/temp only
     set wh $slot2handle($n)
     set p $slot2position($n)
     set rp [RealPosition $p]
+    # (with fixed spots, window n's area is n+1)
+    if {![ValidWindowSettingsN $p] || ![ValidWindowSettingsN $rp]} {
+        Debug "Can't update window $n without settings for its area $rp"
+        return
+    }
     lassign $settings($rp,posXY) lx ly
     lassign $settings($rp,size) lw lh
     set lstayOnTop 0
@@ -3519,6 +3527,18 @@ proc SetAsMainInt {n} {
     set p $slot2position($n)
     if {$p==1} {
         Debug "SetAsMain $n already in slot 1"
+        return
+    }
+    if {[FixedSpots]} {
+        # n to the main area, the previous main one back to its own area (n's stays empty)
+        set m [SlotAtPosition 1]
+        Debug "SetAsMain $n (fixed spots) was in $p, main was $m"
+        set slot2position($n) 1
+        if {$m ne ""} {
+            set slot2position($m) [HomePosition $m]
+            CheckWindow [list UpdateN $m] $m
+        }
+        CheckWindow [list UpdateN $n] $n
         return
     }
     if {![info exists slot2position(1)]} {
@@ -3672,7 +3692,8 @@ proc SaveOrigTitle {w} {
 # Lowest window number of the layout without a captured window (never captured, lost or forgotten), "" if none
 proc FirstFreeSlot {} {
     global settings slot2handle
-    for {set n 1} {$n <= $settings(numWindows)} {incr n} {
+    # (with fixed spots the main area is an extra one: 1 window less)
+    for {set n 1} {[HomePosition $n] <= $settings(numWindows)} {incr n} {
         if {![info exists slot2handle($n)]} {
             return $n
         }
@@ -3750,13 +3771,20 @@ proc PostCapture {w wname} {
     global nextWindow stayOnTop lastUpdate settings
     # Need to really update if we captured/forgot before
     catch {unset lastUpdate($w)}
-    if {[RealPosition $nextWindow] != $nextWindow && [ValidWindowSettingsN 1]} {
-        # mirrored layout: under the main window
-        Update $w {*}$settings(1,posXY) {*}$settings(1,size) 0
+    set n $nextWindow
+    if {[FixedSpots]} {
+        # the main area if there's no main window yet, else its own (known once in the list)
+        updateListBox $n $w $wname
+        UpdateN $n
     } else {
-        Update $w [GetX] [GetY] [GetWidth] [GetHeight] $stayOnTop
+        if {[RealPosition $n] != $n && [ValidWindowSettingsN 1]} {
+            # mirrored layout: under the main window
+            Update $w {*}$settings(1,posXY) {*}$settings(1,size) 0
+        } else {
+            Update $w [GetX] [GetY] [GetWidth] [GetHeight] $stayOnTop
+        }
+        updateListBox $n $w $wname
     }
-    updateListBox $nextWindow $w $wname
     if {[LayoutMirrored]} {
         # the new window under main, or the others under it if it's main
         StackUnderMain
@@ -3842,10 +3870,18 @@ proc updateListBox {n w wname} {
     set slot2handle($n) $w
     unset -nocomplain forgottenSlot($w)
     # lost while swapped: the window that is in its position goes back to its own
-    set m [SlotAtPosition $n]
-    set slot2position($n) $n
+    set target [HomePosition $n]
+    if {[FixedSpots]} {
+        # the main area when there's no main window
+        set main [SlotAtPosition 1]
+        if {$main eq "" || ![info exists slot2handle($main)]} {
+            set target 1
+        }
+    }
+    set m [SlotAtPosition $target]
+    set slot2position($n) $target
     if {$m ne "" && $m != $n} {
-        set slot2position($m) $m
+        set slot2position($m) [HomePosition $m]
         CheckWindow [list UpdateN $m] $m
     }
     set ourWindowHandles($w) [expr 2+$n]
@@ -3867,8 +3903,8 @@ proc updateListBox {n w wname} {
         .lbw insert end " OMB $i (not present)"
     }
     .lbw insert $n0 " $wname "
-    if {$n>$settings(numWindows)} {
-        set settings(numWindows) $n
+    if {[HomePosition $n]>$settings(numWindows)} {
+        set settings(numWindows) [HomePosition $n]
         Overlay
     }
     set nextWindow [expr {$n+1}]
@@ -3878,9 +3914,11 @@ proc updateListBox {n w wname} {
 proc CaptureOrUpdate {} {
     global nextWindow slot2handle settings stayOnTop
     Debug "Capturing/updating $nextWindow"
-    set settings($nextWindow,posXY) "[GetX] [GetY]"
-    set settings($nextWindow,size) "[GetWidth] [GetHeight]"
-    set settings($nextWindow,stayOnTop) $stayOnTop
+    # its own area (with fixed spots, window n's is n+1)
+    set p [HomePosition $nextWindow]
+    set settings($p,posXY) "[GetX] [GetY]"
+    set settings($p,size) "[GetWidth] [GetHeight]"
+    set settings($p,stayOnTop) $stayOnTop
     if {![info exists slot2handle($nextWindow)]} {
         Capture
     } else {
@@ -3906,7 +3944,41 @@ proc UpdateExcluded {} {
 
 proc UpdateLayoutNumWindows {} {
     global settings layoutNumWindowsText
-    set layoutNumWindowsText "Layout for $settings(numWindows) windows"
+    set n $settings(numWindows)
+    if {[LayoutFixedSpotsDraft] && $n > 0} {
+        set layoutNumWindowsText "Layout for [expr {$n-1}] windows + main"
+    } else {
+        set layoutNumWindowsText "Layout for $n windows"
+    }
+}
+
+# Fixed spots checked/unchecked: one more/less area for the same windows, relabeled
+proc LayoutFixedSpotsChanged {} {
+    global settings layoutFixedSpots numWindowsFloat
+    if {$layoutFixedSpots && $settings(layoutStacked)} {
+        set settings(layoutStacked) 0
+    }
+    set n [expr {$settings(numWindows) + ($layoutFixedSpots ? 1 : -1)}]
+    if {$n >= 0 && $n <= [.layout.s cget -to]} {
+        set settings(numWindows) $n
+        set numWindowsFloat $n
+    }
+    UpdateLayoutNumWindows
+    ChangeLayout
+    LayoutRelabel
+}
+
+# Window Layout texts of all the areas (after Fixed spots changed)
+proc LayoutRelabel {} {
+    set c .layout.c
+    if {![winfo exists $c]} {
+        return
+    }
+    foreach item [$c find withtag wowWindow] {
+        set tag [lsearch -inline -regexp [$c gettags $item] {^wow\d+$}]
+        lassign [SizeOfWindow $tag] x y w h
+        UpdateWindowText $tag $w $h
+    }
 }
 
 proc ChangeNumWindow {v} {
@@ -3921,10 +3993,11 @@ proc ChangeNumWindow {v} {
 
 proc WindowLayout {} {
     global settings monitorInfo scale skipMonitorText layoutinfo layoutNumWindowsText scaleText snapMenuText numWindowsFloat \
-        layoutMirrored
+        layoutMirrored layoutFixedSpots
     set tw .layout
     # applied by Save and Apply
     set layoutMirrored $settings(layoutMirrored)
+    set layoutFixedSpots $settings(layoutFixedSpots)
     if {[winfo exists $tw]} {
         wm state $tw normal
         raise $tw
@@ -3949,13 +4022,15 @@ proc WindowLayout {} {
     ttk::checkbutton $tw.cb4 -variable layoutMirrored -text "Mirrored" -command LayoutMirroredChanged
     ttk::checkbutton $tw.cb5 -variable settings(layoutTwoBig) -text "2 big" -command ChangeLayout
     tooltip $tw.cb5 "Two big windows side by side (e.g. tank and healer),\nthe others smaller below them.\nOn several monitors: the first 2 windows the same size"
+    ttk::checkbutton $tw.cb6 -variable layoutFixedSpots -text "Fixed spots" -command LayoutFixedSpotsChanged
+    tooltip $tw.cb6 "Each window keeps its own spot, the main one is an extra area\n(so one more area than windows).\nSwapping sends the previous main window back to its spot,\nthe new main one's spot shows it dimmed in the Mirrored layout"
     tooltip $tw.cb1 "Check or uncheck to redo the layout with\nwindows of the same size (fastest switch later)\nor not (1 big main window and smaller minions windows)"
     tooltip $tw.cb4 "All the game windows stacked under the main one,\nthe other positions show live mirrors of them:\nswaps are instant (no resizing). Click a mirror to make it main.\nFocus follows mouse only works for the main window."
     tooltip $tw.cb3 "All the windows at the same place, filling the biggest monitor:\nonly the one on top (main) is visible, swap to see another one\n(Mirrored also shows the others)"
-    set layoutNumWindowsText "Layout for 99 windows"
+    set layoutNumWindowsText "Layout for 99 windows + main"
     set width [expr {2+[string length $layoutNumWindowsText]}]
     UpdateLayoutNumWindows
-    grid x x $tw.cb5 $tw.cb2 - $tw.cb4 -padx 8 -sticky we
+    grid x $tw.cb6 $tw.cb5 $tw.cb2 - $tw.cb4 -padx 8 -sticky we
     grid $tw.cbA -column 0 -row 0 -sticky {}
     grid [ttk::label $tw.l1 -textvariable layoutNumWindowsText -width $width -anchor c -justify center] $tw.s - $tw.cb1  $tw.cbT $tw.cb3 -sticky we -padx 8
     tooltip $tw.l1 "After automatic layout,\ndrag any window to adjust as necessary,\nuse arrow keys for fine pixel adjustment.\nClick on text to toggle stay on top... etc..."
@@ -4014,9 +4089,15 @@ proc WindowLayout {} {
 }
 
 proc LayoutStackedChanged {} {
-    global settings layoutMirrored
+    global settings layoutMirrored layoutFixedSpots
     if {$settings(layoutStacked)} {
         set layoutMirrored 0
+        if {$layoutFixedSpots} {
+            set layoutFixedSpots 0
+            # (also redoes the layout)
+            LayoutFixedSpotsChanged
+            return
+        }
     }
     ChangeLayout
 }
@@ -4307,7 +4388,7 @@ proc SetWindowOnCanvas {id x1 y1 x2 y2} {
         set sot($id) 0
         after idle "$c itemconfigure $tag&&wowWindow -fill [LayoutWindowColor 0]"
     }
-    $c create text $x1 $y1 -text "\n   ${pin}OMB $id${pin}\n   $w x $h" -anchor "nw" -tags $txtTags
+    $c create text $x1 $y1 -text "\n   ${pin}[AreaLabel $id]${pin}\n   $w x $h" -anchor "nw" -tags $txtTags
     Debug "Window $id $x1,$y1 $x2,$y2 ($tags)"
 }
 
@@ -4385,7 +4466,7 @@ proc UpdateWindowText {tag w h} {
     } else {
         after idle "$c itemconfigure $tag&&wowWindow -fill [LayoutWindowColor 0]"
     }
-    $c itemconfigure $t -text "\n   ${pin}OMB $id${pin}\n   $w x $h"
+    $c itemconfigure $t -text "\n   ${pin}[AreaLabel $id]${pin}\n   $w x $h"
 }
 
 proc LoadLayout {} {
@@ -5966,12 +6047,21 @@ proc Overlay {} {
         } else {
             $t configure -relief $relief
         }
+        # the window there, else the one it's for (with fixed spots, the main one's own area is empty)
+        set n [SlotAtPosition $i]
+        if {$n eq ""} {
+            set n [PositionOwner $i]
+        }
+        if {$n eq ""} {
+            set n 1
+        }
+        $t.l configure -text $n
         if {$settings(overlayClickable)} {
             if {$i==1} {
                 bind $t.l <ButtonPress> SwapNextWindow
                 bind $t.rr <ButtonPress> RRToggle
             } else {
-                bind $t.l <ButtonPress> [list SetAsMain $i]
+                bind $t.l <ButtonPress> [list SetAsMain $n]
             }
         } else {
             if {$i==1} {
@@ -6013,7 +6103,7 @@ proc ResetAll {} {
     set firstBad 0
     for {set i $settings(numWindows)} {$i>=1} {incr i -1} {
         # reset initial position
-        set slot2position($i) $i
+        set slot2position($i) [HomePosition $i]
         CheckWindow [list UpdateN $i] $i
         if {[info exists slot2handle($i)]} {
             Foreground $slot2handle($i)
@@ -6025,7 +6115,14 @@ proc ResetAll {} {
             set firstBad $i
         }
     }
-    SetAsMain 1
+    # with fixed spots the main area is otherwise empty: the first window there
+    set main 1
+    if {[FixedSpots] && $lastGood} {
+        foreach main [lsort -integer [array names slot2handle]] {
+            break
+        }
+    }
+    SetAsMain $main
     if {[winfo exist .lbw]} {
         .lbw delete $lastGood end
     }
@@ -6042,9 +6139,10 @@ proc ResetAll {} {
 }
 
 proc SaveLayout {} {
-    global settings slot2position scale sot layoutMirrored
+    global settings slot2position scale sot layoutMirrored layoutFixedSpots
     set c .layout.c
     set settings(layoutMirrored) $layoutMirrored
+    set settings(layoutFixedSpots) [expr {[info exists layoutFixedSpots] && $layoutFixedSpots && !$settings(layoutStacked)}]
     for {set i 1} {$i<=$settings(numWindows)} {incr i} {
         set coords [SizeOfWindow "wow$i"]
         if {$coords == ""} {
@@ -6055,11 +6153,10 @@ proc SaveLayout {} {
         set settings($i,posXY) "$x1 $y1"
         set settings($i,size) "$w $h"
         set settings($i,stayOnTop) $sot($i)
-        # reset initial position
-        set slot2position($i) $i
-        CheckWindow [list UpdateN $i] $i
         Debug "Sot for $i is $settings($i,stayOnTop) $sot($i)"
     }
+    # reset initial positions
+    ResetPositions
     if {[LayoutMirrored]} {
         # moving windows under main doesn't change their stacking order
         StackUnderMain
@@ -6573,7 +6670,7 @@ proc UpdateLayoutInfo {tag} {
     if {$sot($id)} {
         set x ", On top"
     }
-    set layoutinfo "OMB $id: Top Left ($x1 , $y1) Size $w x $h$x"
+    set layoutinfo "[AreaLabel $id]: Top Left ($x1 , $y1) Size $w x $h$x"
 }
 
 # Window Layout -> main window: the window clicked, moved or resized in the layout becomes the main window's
@@ -6582,6 +6679,13 @@ proc LayoutToMain {tag} {
     global nextWindow
     if {![regexp {^wow(\d+)$} $tag -> id]} {
         return
+    }
+    if {[LayoutFixedSpotsDraft]} {
+        # the main area isn't a window's own
+        if {$id == 1} {
+            return
+        }
+        incr id -1
     }
     # also when it's already the selected one: the trace refreshes the fields
     set nextWindow $id
@@ -6592,7 +6696,7 @@ proc LayoutToMain {tag} {
 proc MainToLayout {} {
     global nextWindow scale settings
     set c .layout.c
-    if {![winfo exists $c] || ![string is integer -strict $nextWindow] || [SizeOfWindow wow$nextWindow] eq ""} {
+    if {![winfo exists $c] || [WindowArea $nextWindow] eq "" || [SizeOfWindow wow[WindowArea $nextWindow]] eq ""} {
         return
     }
     set x [GetX]
@@ -6608,7 +6712,7 @@ proc MainToLayout {} {
     if {$w <= 0 || $h <= 0} {
         return
     }
-    set tag wow$nextWindow
+    set tag wow[WindowArea $nextWindow]
     lassign [SizeOfWindow $tag] ox oy ow oh
     if {$ox == $x && $oy == $y && $ow == $w && $oh == $h} {
         return
@@ -6636,13 +6740,13 @@ proc LayoutBindClose {tw} {
 # Main window's stay on top checkbox -> that window's pin in the Window Layout
 proc MainStayOnTopToLayout {} {
     global nextWindow stayOnTop sot
-    if {![winfo exists .layout.c] || ![string is integer -strict $nextWindow] \
-            || [set draft [SizeOfWindow wow$nextWindow]] eq ""} {
+    set a [WindowArea $nextWindow]
+    if {![winfo exists .layout.c] || $a eq "" || [set draft [SizeOfWindow wow$a]] eq ""} {
         return
     }
-    set sot($nextWindow) $stayOnTop
+    set sot($a) $stayOnTop
     lassign $draft x y w h
-    UpdateWindowText wow$nextWindow $w $h
+    UpdateWindowText wow$a $w $h
 }
 
 # -- move/resize windows in layout
@@ -7036,6 +7140,82 @@ proc SlotAtPosition {p} {
         }
     }
     return ""
+}
+
+# Fixed spots: each window has its own small area (window n in area n+1), area 1 is the main one's: a swap
+# sends the previous main window back to its own area (else the 2 windows exchange their areas)
+proc FixedSpots {} {
+    global settings
+    expr {[info exists settings(layoutFixedSpots)] && $settings(layoutFixedSpots) && !$settings(layoutStacked)}
+}
+
+# Area window n goes back to when it's not the main one
+proc HomePosition {n} {
+    expr {[FixedSpots] ? $n+1 : $n}
+}
+
+# Window whose own area is p ("" for the main area with fixed spots)
+proc PositionOwner {p} {
+    if {![FixedSpots]} {
+        return $p
+    }
+    if {$p == 1} {
+        return ""
+    }
+    expr {$p-1}
+}
+
+# Window shown by the mirrored layout's mirror in area p: the one there, with fixed spots always the same one
+# (dimmed when it's the main one)
+proc LayoutMirrorSource {p} {
+    if {[FixedSpots]} {
+        return [PositionOwner $p]
+    }
+    SlotAtPosition $p
+}
+
+# Every window in its own area; with fixed spots window 1 (or the first one there) in the main area
+proc ResetPositions {} {
+    global slot2position slot2handle settings
+    for {set n 1} {$n <= $settings(numWindows)} {incr n} {
+        set slot2position($n) [HomePosition $n]
+    }
+    if {[FixedSpots]} {
+        foreach n [lsort -integer [array names slot2handle]] {
+            set slot2position($n) 1
+            break
+        }
+    }
+    for {set n 1} {$n <= $settings(numWindows)} {incr n} {
+        CheckWindow [list UpdateN $n] $n
+    }
+}
+
+# Window Layout (draft, before Save and Apply) labels: with fixed spots, area 1 is "Main" and area n+1 window n's
+proc LayoutFixedSpotsDraft {} {
+    global layoutFixedSpots settings
+    if {![winfo exists .layout] || ![info exists layoutFixedSpots]} {
+        return [FixedSpots]
+    }
+    expr {$layoutFixedSpots && !$settings(layoutStacked)}
+}
+
+proc AreaLabel {p} {
+    if {![LayoutFixedSpotsDraft]} {
+        return "OMB $p"
+    }
+    if {$p == 1} {
+        return "Main"
+    }
+    return "OMB [expr {$p-1}]"
+}
+
+# Main window's selected window number <-> its layout area
+proc WindowArea {n} {
+    if {![string is integer -strict $n]} {
+        return ""
+    }
+    expr {[LayoutFixedSpotsDraft] ? $n+1 : $n}
 }
 
 # Window number for a mirror source
@@ -7438,7 +7618,7 @@ proc MirrorRefresh {i} {
 
 # Shows the src {left top right bottom} client area of window n in the dst area of toplevel t,
 # for mirror i (an index in settings(mirrors), or L<position> for the mirrored layout ones)
-proc MirrorThumbnail {i t n src dst} {
+proc MirrorThumbnail {i t n src dst {opacity 255}} {
     global slot2handle mirrorThumb mirrorSrc mirrorLast
     set hwnd [HwndInt $slot2handle($n)]
     if {![info exists mirrorSrc($i)] || $mirrorSrc($i) != $hwnd} {
@@ -7453,7 +7633,7 @@ proc MirrorThumbnail {i t n src dst} {
         Debug "Mirror $i now showing OMB $n"
     }
     # skip if unchanged
-    set key [list $src $dst]
+    set key [list $src $dst $opacity]
     if {[info exists mirrorLast($i)] && $mirrorLast($i) eq $key} {
         return
     }
@@ -7463,13 +7643,13 @@ proc MirrorThumbnail {i t n src dst} {
     set props [dict create dwFlags 0x1f \
         rcDestination [dict create left $dl top $dt right $dr bottom $db] \
         rcSource [dict create left $sl top $st right $sr bottom $sb] \
-        opacity 255 fVisible 1 fSourceClientAreaOnly 1]
+        opacity $opacity fVisible 1 fSourceClientAreaOnly 1]
     DwmUpdateThumbnailProperties $mirrorThumb($i) $props
 }
 
 # Mirrors of the windows stacked under the main one, in their layout positions (2 and up)
 proc LayoutMirrorsRefresh {} {
-    global settings slot2handle
+    global settings slot2handle slot2position
     set on [LayoutMirrored]
     foreach t [winfo children .] {
         if {[regexp {^\.lmirror(\d+)$} $t -> p] && (!$on || $p > $settings(numWindows))} {
@@ -7508,7 +7688,7 @@ proc LayoutMirrorsRefresh {} {
         if {[wm geometry $t] ne "${w}x$h+$x+$y"} {
             wm geometry $t ${w}x$h+$x+$y
         }
-        set n [SlotAtPosition $p]
+        set n [LayoutMirrorSource $p]
         if {$n eq "" || ![info exists slot2handle($n)] || ![twapi::window_exists $slot2handle($n)]
                 || [OnOtherDesktopN $n] || [catch {MirrorSourceSize $n} csize]} {
             MirrorDetach L$p
@@ -7521,7 +7701,12 @@ proc LayoutMirrorsRefresh {} {
             MirrorClickThrough $t 0
         }
         lassign $csize cw ch
-        MirrorThumbnail L$p $t $n [list 0 0 $cw $ch] [MirrorFit $cw $ch $w $h]
+        # fixed spots: the main window's own area shows it dimmed (just its opacity changes on a swap)
+        set opacity 255
+        if {$slot2position($n) == 1} {
+            set opacity 90
+        }
+        MirrorThumbnail L$p $t $n [list 0 0 $cw $ch] [MirrorFit $cw $ch $w $h] $opacity
     }
     if {$created} {
         UpdateHandles
@@ -7532,7 +7717,7 @@ proc LayoutMirrorsRefresh {} {
 # at the same place in it
 proc LayoutMirrorClick {p x y} {
     global settings
-    set n [SlotAtPosition $p]
+    set n [LayoutMirrorSource $p]
     if {$n eq ""} {
         return
     }
@@ -8125,6 +8310,7 @@ array set settings {
     layoutOneSize 0
     layoutOneRowCol 0
     layoutTwoBig 0
+    layoutFixedSpots 0
     layoutStacked 0
     layoutMirrored 0
     layoutScale "1/6"

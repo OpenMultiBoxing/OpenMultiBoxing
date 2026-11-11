@@ -22,7 +22,7 @@ WriteProfile Mirrored {array set settings {numWindows 3 layoutMirrored 1 mirrors
 WriteProfile Old {array set settings {numWindows 2}}
 WriteProfile Broken "array set settings \{"
 
-array set settings {profile Mirrored mirrors {} layoutMirrored 0 numWindows 0}
+array set settings {profile Mirrored mirrors {} layoutMirrored 0 layoutFixedSpots 0 numWindows 0}
 LoadProfile
 Check "mirrored loaded" $settings(layoutMirrored) 1
 Check "mirrors loaded" [llength $settings(mirrors)] 1
