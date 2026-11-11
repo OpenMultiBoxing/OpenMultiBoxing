@@ -16,6 +16,8 @@ The source for the [binary distribution](https://github.com/OpenMultiBoxing/Open
 
 - **Dark mode** (v11.0.0+, needs its new .exe): Option menu > Appearance: same as Windows (the default, follows it when you change it), light or dark. See the [help](https://OpenMultiBoxing.org/help#appearance-dark-mode).
 - Window Layout wizard and manual tweaking; get your game windows exactly how you want them to be to play.
+   - **"2 big" (windows)** (v11.4.0+): two big windows side by side (e.g. tank and healer), the others smaller below them; on several monitors, the first 2 windows are the same size. The auto layouts also use the space a fixed aspect ratio leaves free (e.g. at 4:3 on a 16:9 monitor, 9 windows at the sizes 6 had).
+   - **Fixed spots** (v11.5.0+): each window keeps its own spot and the main window gets an extra area: a swap sends the previous main window back to its spot. With the Mirrored layout, each spot always shows its own window, dimmed while it's the main one. See the [help](https://OpenMultiBoxing.org/help#window-layout-options).
    - Save different layouts as profiles (File > New Profile...) and cycle through them with the Ctrl-Shift-L (next) and Ctrl-Shift-Alt-L (previous) hotkeys. Pick which profiles are in the rotation with Profile > "Profiles in rotation..." (all but Default by default). Default is a profile too, with its own settings: saving another profile doesn't change it.
 - Any game or app: pick it in the Game menu or add its window title with Game > "Add game window title..." (use `*` to match a changing part, e.g. a version number in the title).
 - Instant swapping of windows; with keyboard hotkeys for fast switching to the next or any specific window.
