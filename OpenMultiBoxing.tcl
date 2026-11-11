@@ -1626,7 +1626,7 @@ proc UISetup {} {
         wm iconphoto . -default $imgOMB70
     }
     set labelW 18
-    grid [ttk::button .bH -text "Help" -width $labelW -command Help]  -row 1 -column 1 -padx 4
+    grid [ttk::button .bH -text "Help" -width $labelW -command Help]  -row 1 -column 1
     tooltip .bH "Opens online help page"
     grid [ttk::button .bwl -text "Window Layout" -width $labelW -command WindowLayout] -row 2 -column 1
     tooltip .bwl "View or change the Window Layout"
