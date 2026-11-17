@@ -19,6 +19,18 @@ set settings(mirrors) [list [dict create source main area {0 0 1 1} geom {1 2 3 
 MirrorSet 1 top 1
 Check "set top" [dict get [lindex $settings(mirrors) 1] top] 1
 Check "other unchanged" [dict get [lindex $settings(mirrors) 0] geom] {1 2 3 4}
+MirrorSet 2 area {0 0 1 1}
+Check "deleted mirror not set" [llength $settings(mirrors)] 2
+
+# broken mirror saved by older versions (set after its deletion) is dropped
+proc MirrorInit {} {return 0}
+rename LayoutShowMirrors LayoutShowMirrorsSaved
+proc LayoutShowMirrors {} {}
+lappend settings(mirrors) {area {0 0 1 1}}
+MirrorsRebuild
+Check "broken mirror dropped" [llength $settings(mirrors)] 2
+rename LayoutShowMirrors ""
+rename LayoutShowMirrorsSaved LayoutShowMirrors
 
 Check "edges middle" [MirrorEdges 50 50 100 100] ""
 Check "edges right" [MirrorEdges 95 50 100 100] r
