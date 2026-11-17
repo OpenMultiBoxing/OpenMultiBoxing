@@ -55,8 +55,10 @@ Easiest: get it from the Microsoft Store, which installs and updates it for you 
 <a href="https://apps.microsoft.com/detail/9n0dz59nl2dw"><img src="https://get.microsoft.com/images/en-us%20dark.svg" width="200" alt="Get it from Microsoft"/></a>
 
 The Store version keeps its settings and profiles in `Documents\OpenMultiBoxing` (copy your `OpenMultiBoxingSettings*.tcl` files there to bring yours).
+If it shows a "Bad Image" error about `tcl9twapi520.dll` when starting (Windows with Smart App Control turned on), update it to v11.5.2 or newer.
 
 Or the zip: new since version 2.2 we made a compact all in one .exe binary distribution. Just grab the latest binary Zip file (e.g `OpenMultiBoxing-vX.Y.Z.zip`, not the source zip) and extract all to your desktop for instance. The binary (a single one that does broadcasting, without the old round robin mode) is built automatically by the Github CI and can be found on the [releases page](https://github.com/OpenMultiBoxing/OpenMultiBoxing/releases).
+Binaries older than v11.5.2 left empty `TCL...` folders (some with `.dll` files) in your temporary files folder (type `%TEMP%` in the File Explorer address bar): you can delete them once OpenMultiBoxing is closed.
 
 Go through the Window Layout Wizard to pick how many game windows you plan on playing with and their layout, save and apply.
 
